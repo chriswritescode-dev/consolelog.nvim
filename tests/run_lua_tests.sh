@@ -11,7 +11,7 @@ echo -e "${BLUE}================================${NC}"
 echo -e "${BLUE}ConsoleLog Lua Test Suite${NC}"
 echo -e "${BLUE}================================${NC}\n"
 
-TEST_DIR="tests/lua"
+TEST_DIR="lua"
 FAILED_TESTS=()
 PASSED_TESTS=()
 
@@ -21,7 +21,7 @@ run_test() {
     
     echo -e "${CYAN}Running: ${test_name}${NC}"
     
-    nvim --headless -c "luafile $test_file" -c "qa!" 2>&1 | tee /tmp/test_output.txt
+    nvim --headless -c "lua package.path = './lua/?.lua;./tests/lua/?.lua;' .. package.path" -c "luafile $test_file" -c "qa!" 2>&1 | tee /tmp/test_output.txt
     
     # Check for actual failures, not just the presence of ✗ in output
     if grep -q "FAILED:" /tmp/test_output.txt || grep -q "Error detected" /tmp/test_output.txt || grep -q "stack traceback:" /tmp/test_output.txt; then
