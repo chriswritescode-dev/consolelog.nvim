@@ -117,21 +117,21 @@ function M.get_framework_config(framework)
 		},
 		[M.FRAMEWORKS.REACT] = {
 			name = "React",
-			dev_server_files = { "public/index.html" },
+			dev_server_files = { "node_modules/react-dom", "node_modules/react-scripts" },
 			config_files = { "webpack.config.js", "craco.config.js" },
 			inject_client = true,
 			supports_inspector = false
 		},
 		[M.FRAMEWORKS.VUE] = {
 			name = "Vue",
-			dev_server_files = { "public/index.html", "index.html" },
+			dev_server_files = { "node_modules/vue", "node_modules/@vue" },
 			config_files = { "vue.config.js" },
 			inject_client = true,
 			supports_inspector = false
 		},
 		[M.FRAMEWORKS.VITE] = {
 			name = "Vite",
-			dev_server_files = { "index.html" },
+			dev_server_files = { "node_modules/vite" },
 			config_files = { "vite.config.js", "vite.config.ts" },
 			inject_client = true,
 			supports_inspector = false
@@ -145,7 +145,7 @@ function M.get_framework_config(framework)
 		},
 		[M.FRAMEWORKS.SVELTE] = {
 			name = "Svelte",
-			dev_server_files = { "public/index.html", "index.html" },
+			dev_server_files = { "node_modules/svelte" },
 			config_files = { "svelte.config.js", "rollup.config.js" },
 			inject_client = true,
 			supports_inspector = false
