@@ -4,6 +4,7 @@ local formatter = require("consolelog.processing.formatter")
 local constants = require("consolelog.core.constants")
 local extmark_writer = require("consolelog.display.extmark_writer")
 local vtext_builder = require("consolelog.display.virtual_text_builder")
+local utils = require("consolelog.core.utils")
 
 M.extmarks = {}
 M.throttle_timers = {}
@@ -224,8 +225,9 @@ function M.update_output(bufnr, line, value, console_type, raw_value)
 			tostring(console_type), line, tostring(value):sub(1, 100)))
 
 	if raw_value then
+		local utils = require("consolelog.core.utils")
 		debug_logger.log("UPDATE_OUTPUT", string.format("Raw value type: %s, islist: %s",
-			type(raw_value), vim.islist(raw_value) and "yes" or "no"))
+			type(raw_value), utils.islist(raw_value) and "yes" or "no"))
 		if type(raw_value) == "table" then
 			debug_logger.log("UPDATE_OUTPUT", string.format("Raw value content: %s", vim.inspect(raw_value)))
 		end
@@ -257,7 +259,8 @@ function M.update_output(bufnr, line, value, console_type, raw_value)
 	local value_type = "unknown"
 	if raw_value then
 		if type(raw_value) == "table" then
-			if vim.islist(raw_value) then
+			local utils = require("consolelog.core.utils")
+			if utils.islist(raw_value) then
 				value_type = "array"
 			else
 				value_type = "object"
@@ -447,7 +450,8 @@ function M.toggle_output_window()
 
 		local content
 		if output.raw_value then
-			if type(output.raw_value) == "table" and vim.islist(output.raw_value) then
+			local utils = require("consolelog.core.utils")
+			if type(output.raw_value) == "table" and utils.islist(output.raw_value) then
 				local parts = {}
 				for _, arg in ipairs(output.raw_value) do
 					if type(arg) == "string" then
