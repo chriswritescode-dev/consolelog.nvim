@@ -11,22 +11,46 @@ local injectors = {
   vue = require("consolelog.injection.injectors.vue"),
 }
 
--- Detect which framework is being used
+-- Detect which framework is being used (backward compatibility)
 function M.detect_framework(project_root)
-  local framework = framework_detector.detect_framework(project_root)
+  local handlers = framework_detector.get_available_handlers(project_root)
   
-  if framework == framework_detector.FRAMEWORKS.UNKNOWN or 
-     framework == framework_detector.FRAMEWORKS.NODE then
+  if #handlers == 0 then
     return nil, nil
   end
   
-  local injector = injectors[framework]
+  -- Return first detected framework for compatibility
+  local handler = handlers[1]
+  local injector = injectors[handler.injector]
+  
   if injector then
-    debug_logger.log("INJECTOR", string.format("Detected %s project", framework))
-    return framework, injector
+    debug_logger.log("INJECTOR", string.format("Detected %s project", handler.framework))
+    return handler.framework, injector
   end
   
   return nil, nil
+end
+
+-- Get all available injectors for a project
+function M.get_available_injectors(project_root)
+  local handlers = framework_detector.get_available_handlers(project_root)
+  local available_injectors = {}
+  
+  for _, handler in ipairs(handlers) do
+    local injector_module = injectors[handler.injector]
+    if injector_module then
+      table.insert(available_injectors, {
+        framework = handler.framework,
+        name = handler.name,
+        injector = handler.injector,
+        module = injector_module,
+        evidence = handler.evidence,
+        framework_detection = handler.framework_detection
+      })
+    end
+  end
+  
+  return available_injectors
 end
 
 -- Detect framework using consistent project root detection
@@ -58,6 +82,35 @@ function M.patch(project_root, ws_port)
   end
   
   return success, framework
+end
+
+-- Patch all detected frameworks
+function M.patch_all(project_root, ws_port)
+  local available_injectors = M.get_available_injectors(project_root)
+  local results = {}
+  
+  if #available_injectors == 0 then
+    debug_logger.log("INJECTOR", "No supported frameworks detected")
+    return results
+  end
+  
+  for _, injector_info in ipairs(available_injectors) do
+    local success = injector_info.module.patch(project_root, ws_port)
+    table.insert(results, {
+      framework = injector_info.framework,
+      name = injector_info.name,
+      success = success,
+      evidence = injector_info.evidence
+    })
+    
+    if success then
+      debug_logger.log("INJECTOR", string.format("Successfully patched %s", injector_info.framework))
+    else
+      debug_logger.log("INJECTOR", string.format("Failed to patch %s", injector_info.framework))
+    end
+  end
+  
+  return results
 end
 
 -- Unpatch the framework

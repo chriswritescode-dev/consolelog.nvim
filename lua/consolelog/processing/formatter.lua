@@ -1,6 +1,6 @@
 local M = {}
 
-
+local utils = require("consolelog.core.utils")
 
 local function prettify_json(json_str)
 	local ok, parsed = pcall(vim.json.decode, json_str)
@@ -62,7 +62,7 @@ end
 
 local function format_table_preview(tbl, max_items)
 	max_items = max_items or 2
-	local is_array = vim.islist(tbl)
+	local is_array = utils.islist(tbl)
 	local count = vim.tbl_count(tbl)
 	local preview_parts = {}
 	local i = 0

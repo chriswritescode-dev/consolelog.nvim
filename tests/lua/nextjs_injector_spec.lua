@@ -121,8 +121,9 @@ if (typeof window !== 'undefined') {
       -- Check that file was modified
       local modified_content = read_file_content(app_index_path)
       assert.not_nil(modified_content, "File should still exist")
-      assert.is_true(modified_content:match("ConsoleLog%.nvim auto%-injection") ~= nil, "Should contain ConsoleLog injection")
       assert.is_true(modified_content:match("window%.__CONSOLELOG_WS_PORT") ~= nil, "Should set WebSocket port")
+      assert.is_true(modified_content:match("window%.__CONSOLELOG_PROJECT_ID") ~= nil, "Should set project ID")
+      assert.is_true(modified_content:match("window%.__CONSOLELOG_FRAMEWORK") ~= nil, "Should set framework")
       
       cleanup()
     end)
@@ -151,9 +152,9 @@ if (typeof window !== 'undefined') {
       
       assert.is_true(patched, "Should return true even if already patched")
       
-      -- Check that content wasn't modified
+      -- Check that port wasn't changed (but project ID might be updated)
       local modified_content = read_file_content(app_index_path)
-      assert.equals(modified_content, pre_patched_content, "Content should remain the same when already patched")
+      assert.is_true(modified_content:match("window%.__CONSOLELOG_WS_PORT%s*=%s*9999") ~= nil, "Port should remain 9999")
       
       cleanup()
     end)

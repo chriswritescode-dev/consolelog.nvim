@@ -3,6 +3,7 @@ local M = {}
 local line_matching = require("consolelog.processing.line_matching")
 local display = require("consolelog.display.display")
 local debug_logger = require("consolelog.core.debug_logger")
+local utils = require("consolelog.core.utils")
 
 function M.format_args(args, method)
 	if not args or #args == 0 then
@@ -31,7 +32,7 @@ function M.format_args(args, method)
 				local ok, parsed = pcall(vim.fn.json_decode, arg)
 				if ok and type(parsed) == "table" then
 					local count = 0
-					local is_array = vim.islist(parsed)
+					local is_array = utils.islist(parsed)
 
 					if is_array then
 						count = #parsed
