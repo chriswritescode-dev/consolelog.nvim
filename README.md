@@ -1,4 +1,4 @@
-# consolelog.nvim - dddd
+# consolelog.nvim
 
 **See your console output right where it belongs - next to your code!**
 
