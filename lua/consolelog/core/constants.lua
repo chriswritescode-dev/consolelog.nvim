@@ -77,6 +77,12 @@ M.FILES = {
 	BACKUP_SUFFIX = ".bk"
 }
 
+M.INJECTION = {
+	START_MARKER = "// ConsoleLog.nvim auto-injection start",
+	END_MARKER = "// ConsoleLog.nvim auto-injection end",
+	BLOCK_PATTERN = "// ConsoleLog%.nvim auto%-injection start.-// ConsoleLog%.nvim auto%-injection end\n?"
+}
+
 M.LOG_LEVELS = {
 	DEBUG = "DEBUG",
 	INFO = "INFO",
@@ -134,4 +140,3 @@ function M.is_python_file(filepath)
 end
 
 return M
-

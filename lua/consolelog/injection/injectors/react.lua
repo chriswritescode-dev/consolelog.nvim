@@ -50,8 +50,8 @@ function M.is_patched(project_root)
     for _, root in ipairs(search_roots) do
       local filepath = root .. file
       if vim.fn.filereadable(filepath) == 1 then
-        local backup_path = filepath .. constants.FILES.BACKUP_SUFFIX
-        if vim.fn.filereadable(backup_path) == 1 then
+        local content = table.concat(vim.fn.readfile(filepath), "\n")
+        if content:find("window.__CONSOLELOG_WS_PORT", 1, true) then
           patched_files = patched_files + 1
           debug_logger.log("REACT_PATCH", string.format("Found patched file: %s", filepath))
         end
@@ -102,7 +102,7 @@ function M.patch(project_root, ws_port)
     debug_logger.log("REACT_PATCH", "Source map resolver not found, skipping")
   end
 
-  local inject_script = string.format([[
+  local inject_script = constants.INJECTION.START_MARKER .. "\n" .. string.format([[
 if (typeof window !== 'undefined') {
   window.__CONSOLELOG_WS_PORT = %d;
   window.__CONSOLELOG_PROJECT_ID = '%s';
@@ -111,7 +111,7 @@ if (typeof window !== 'undefined') {
   %s
   %s
 }
-]], ws_port, project_id, sourcemap_content, inject_content)
+]], ws_port, project_id, sourcemap_content, inject_content) .. constants.INJECTION.END_MARKER
 
   for _, file in ipairs(REACT_FILES) do
     local found_file = false
@@ -134,12 +134,20 @@ if (typeof window !== 'undefined') {
         end
 
         local content = table.concat(vim.fn.readfile(filepath), "\n")
+        if not content:find("window.__CONSOLELOG_WS_PORT", 1, true) then
+          local success = vim.fn.writefile(vim.fn.readfile(filepath, "b"), backup_path, "b")
+          if success ~= 0 then
+            debug_logger.log("REACT_PATCH", string.format("Failed to refresh backup: %s", backup_path))
+            break
+          end
+        end
+        if not content:find(constants.INJECTION.START_MARKER, 1, true)
+            and content:find("window.__CONSOLELOG_WS_PORT", 1, true) then
+          content = table.concat(vim.fn.readfile(backup_path), "\n")
+        end
 
-        if content:match("ConsoleLog%.nvim auto%-injection") then
-          local start_marker = "// ConsoleLog%.nvim auto%-injection"
-          local end_marker = "\n}\n"
-          local pattern = start_marker .. ".-" .. end_marker
-          content = content:gsub(pattern, "", 1)
+        if content:find(constants.INJECTION.START_MARKER, 1, true) then
+          content = content:gsub(constants.INJECTION.BLOCK_PATTERN, "", 1)
           debug_logger.log("REACT_PATCH", string.format("Removed old injection from %s", filepath))
         end
 
@@ -189,6 +197,12 @@ function M.unpatch(project_root)
       local backup_path = filepath .. constants.FILES.BACKUP_SUFFIX
 
       if vim.fn.filereadable(backup_path) == 1 then
+        local has_injection = vim.fn.filereadable(filepath) ~= 1
+            or table.concat(vim.fn.readfile(filepath), "\n"):find("window.__CONSOLELOG_WS_PORT", 1, true)
+        if not has_injection then
+          vim.fn.delete(backup_path)
+          break
+        end
         local success = vim.fn.writefile(vim.fn.readfile(backup_path, "b"), filepath, "b")
         if success == 0 then
           unpatched_count = unpatched_count + 1
@@ -198,6 +212,13 @@ function M.unpatch(project_root)
           debug_logger.log("REACT_PATCH", string.format("Deleted backup: %s", backup_path))
         else
           debug_logger.log("REACT_PATCH", string.format("Failed to restore from backup: %s", filepath))
+        end
+        break
+      elseif vim.fn.filereadable(filepath) == 1 then
+        local content = table.concat(vim.fn.readfile(filepath), "\n")
+        local restored, removed = content:gsub(constants.INJECTION.BLOCK_PATTERN, "", 1)
+        if removed > 0 and vim.fn.writefile(vim.split(restored, "\n"), filepath) == 0 then
+          unpatched_count = unpatched_count + 1
         end
         break
       else

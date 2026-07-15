@@ -106,7 +106,7 @@ describe("NextJS Injector Tests", function()
   end)
   
   describe("Patch functionality", function()
-    it("should handle missing inject script gracefully", function()
+    it("should successfully patch app-index.js", function()
       setup()
       
       -- Create mock app-index.js file
@@ -120,79 +120,47 @@ if (typeof window !== 'undefined') {
       
       local app_index_path = create_app_index_file(original_content)
       
-      -- In test environment, injector cannot locate plugin directory,
-      -- so patch returns false gracefully
       local ws_port = 9999
       local patched = nextjs_injector.patch(project_root, ws_port)
       
-      assert.is_false(patched, "Should return false when inject script not found")
+      assert.is_true(patched, "Should successfully patch app-index.js")
+
+      local patched_content = read_file_content(app_index_path)
+      assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 9999") ~= nil,
+        "Patched content should contain port 9999")
       
       cleanup()
     end)
     
-    it("should re-patch with updated port when inject script is found", function()
+    it("should re-patch with updated port", function()
       setup()
       
-      -- The injector resolves plugin_dir via debug.getinfo. In the fallback path
-      -- (when consolelog.nvim pattern doesn't match), fnamemodify(:p) returns a
-      -- path WITHOUT trailing slash, causing "lua" .. "js/" to become "luajs/".
-      -- Workaround: create a mock consolelog.nvim installation so the primary
-      -- pattern match succeeds (it includes the trailing slash in the capture).
-      local cwd = vim.fn.getcwd()
-      local mock_dir = temp_dir .. "/consolelog.nvim"
-      vim.fn.mkdir(mock_dir .. "/lua/consolelog/injection/injectors", "p")
-      vim.fn.mkdir(mock_dir .. "/js", "p")
-      vim.fn.system("cp " .. vim.fn.shellescape(cwd .. "/lua/consolelog/injection/injectors/nextjs.lua") .. " " .. vim.fn.shellescape(mock_dir .. "/lua/consolelog/injection/injectors/nextjs.lua"))
-      vim.fn.system("cp " .. vim.fn.shellescape(cwd .. "/js/inject-client.js") .. " " .. vim.fn.shellescape(mock_dir .. "/js/inject-client.js"))
-      vim.fn.system("cp " .. vim.fn.shellescape(cwd .. "/js/nextjs-auto-injector.js") .. " " .. vim.fn.shellescape(mock_dir .. "/js/nextjs-auto-injector.js"))
-      vim.fn.system("cp " .. vim.fn.shellescape(cwd .. "/js/sourcemap-resolver.js") .. " " .. vim.fn.shellescape(mock_dir .. "/js/sourcemap-resolver.js"))
-
-      -- Temporarily load the injector from the mock installation
-      local orig_path = package.path
-      package.path = mock_dir .. "/lua/?.lua;" .. package.path
-      package.loaded["consolelog.injection.injectors.nextjs"] = nil
-      local mock_injector = require('consolelog.injection.injectors.nextjs')
-      package.path = orig_path
-
-      -- Create pre-patched app-index.js with port 8888
-      local pre_patched_content = [[
+      local original_content = [[
 'use client'
-// ConsoleLog.nvim auto-injection
-if (typeof window !== 'undefined') {
-  window.__CONSOLELOG_WS_PORT = 8888;
-  window.__CONSOLELOG_PROJECT_ID = 'test-project';
-  window.__CONSOLELOG_FRAMEWORK = 'Next.js';
-  window.__CONSOLELOG_DEBUG = false;
-}
 if (typeof window !== 'undefined') {
   console.log('Hello from Next.js');
 }
 ]]
       
-      local app_index_path = create_app_index_file(pre_patched_content)
+      local app_index_path = create_app_index_file(original_content)
+
+      nextjs_injector.patch(project_root, 8888)
       
-      -- Re-patch with a different port using the mock injector
       local new_ws_port = 9999
-      local patched = mock_injector.patch(project_root, new_ws_port)
+      local patched = nextjs_injector.patch(project_root, new_ws_port)
       
       assert.is_true(patched, "Should successfully re-patch")
       
-      -- Verify the new port appears in patched content
       local patched_content = read_file_content(app_index_path)
-      assert.is_true(patched_content ~= nil, "Patched file should exist")
       assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 9999") ~= nil,
         "Re-patched content should contain new port 9999")
       assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 8888") == nil,
         "Re-patched content should not contain old port 8888")
-
-      -- Restore the original module
-      package.loaded["consolelog.injection.injectors.nextjs"] = nil
-      nextjs_injector = require('consolelog.injection.injectors.nextjs')
       
       cleanup()
     end)
     
-    it("should not create backup when patch fails", function()
+    it("should create backup when patching", function()
       setup()
       
       local original_content = [[
@@ -207,10 +175,91 @@ if (typeof window !== 'undefined') {
       local ws_port = 9999
       nextjs_injector.patch(project_root, ws_port)
       
-      -- In test environment, patch fails so no backup is created
       local backup_content = read_file_content(app_index_path .. ".bk")
-      assert.is_nil(backup_content, "No backup should be created when patch fails")
+      assert.not_nil(backup_content, "Backup should be created when patch succeeds")
+      assert.equals(backup_content, original_content, "Backup should contain original content")
+
+      cleanup()
+    end)
+
+    it("should upgrade legacy injection without start/end markers", function()
+      setup()
+
+      local original_content = [[
+'use client'
+if (typeof window !== 'undefined') {
+  console.log('Hello from Next.js');
+}
+]]
+
+      local app_index_path = create_app_index_file(original_content)
+
+      vim.fn.writefile(vim.split(original_content, "\n"), app_index_path .. ".bk")
+
+      local legacy_content = [[
+'use client'
+if (typeof window !== 'undefined') {
+  window.__CONSOLELOG_WS_PORT = 8888;
+  window.__CONSOLELOG_PROJECT_ID = 'test-project';
+  window.__CONSOLELOG_FRAMEWORK = 'Next.js';
+  window.__CONSOLELOG_DEBUG = false;
+}
+if (typeof window !== 'undefined') {
+  console.log('Hello from Next.js');
+}
+]]
+      vim.fn.writefile(vim.split(legacy_content, "\n"), app_index_path)
+
+      local patched = nextjs_injector.patch(project_root, 9999)
+      assert.is_true(patched, "Should successfully upgrade legacy injection")
+
+      local patched_content = read_file_content(app_index_path)
+      assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 9999") ~= nil,
+        "Upgraded content should contain new port 9999")
+      assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 8888") == nil,
+        "Upgraded content should not contain legacy port 8888")
+      local _, start_count = patched_content:gsub("// ConsoleLog%.nvim auto%-injection start", "")
+      assert.equals(1, start_count, "Should contain exactly one start marker")
       
+      cleanup()
+    end)
+
+    it("should update injected auto-injector code in cpu-profile.js when re-patching", function()
+      setup()
+
+      vim.fn.mkdir(project_root .. "/node_modules/next/dist/server/lib", "p")
+      local cpu_profile_path = project_root .. "/node_modules/next/dist/server/lib/cpu-profile.js"
+      local cpu_content = "function enableProfiling() {\n  return true;\n}\n"
+      vim.fn.writefile(vim.split(cpu_content, "\n"), cpu_profile_path)
+
+      local original_content = [[
+'use client'
+if (typeof window !== 'undefined') {
+  console.log('Hello from Next.js');
+}
+]]
+      create_app_index_file(original_content)
+
+      nextjs_injector.patch(project_root, 8888)
+
+      local cpu_after_first = read_file_content(cpu_profile_path)
+      assert.is_true(cpu_after_first:find("WS_PORT = 8888") ~= nil,
+        "cpu-profile.js should contain port 8888 after first patch")
+
+      local updated_cpu_content = "function updatedProfiling() {\n  return true;\n}\n"
+      vim.fn.writefile(vim.split(updated_cpu_content, "\n"), cpu_profile_path)
+      nextjs_injector.patch(project_root, 9999)
+
+      local cpu_after_second = read_file_content(cpu_profile_path)
+      assert.is_true(cpu_after_second:find("WS_PORT = 9999") ~= nil,
+        "cpu-profile.js should contain port 9999 after re-patch")
+      assert.is_true(cpu_after_second:find("WS_PORT = 8888") == nil,
+        "cpu-profile.js should not contain old port 8888 after re-patch")
+
+      nextjs_injector.unpatch(project_root)
+      assert.equals(updated_cpu_content, read_file_content(cpu_profile_path),
+        "Unpatch should restore current dependency content")
+
       cleanup()
     end)
   end)
@@ -314,10 +363,37 @@ if (typeof window !== 'undefined') {
       
       cleanup()
     end)
+
+    it("should remove bounded marker block when backup is missing", function()
+      setup()
+
+      local marker_block = "// ConsoleLog.nvim auto-injection start\n" ..
+        "if (typeof window !== 'undefined') {\n" ..
+        "  window.__CONSOLELOG_WS_PORT = 9999;\n" ..
+        "  window.__CONSOLELOG_PROJECT_ID = 'test';\n" ..
+        "  window.__CONSOLELOG_FRAMEWORK = 'Next.js';\n" ..
+        "  window.__CONSOLELOG_DEBUG = false;\n" ..
+        "}\n" ..
+        "// ConsoleLog.nvim auto-injection end\n"
+
+      local file_with_marker = "'use client'\n" .. marker_block ..
+        "if (typeof window !== 'undefined') {\n  console.log('Hello from Next.js');\n}\n"
+      local app_index_path = create_app_index_file(file_with_marker)
+
+      nextjs_injector.unpatch(project_root)
+
+      local result = read_file_content(app_index_path)
+      assert.is_true(result:find("ConsoleLog%.nvim auto%-injection") == nil,
+        "Marker block should be removed when backup is missing")
+      assert.is_true(result:find("console.log") ~= nil,
+        "Surrounding original code should be preserved")
+
+      cleanup()
+    end)
   end)
   
   describe("Complete patch/unpatch cycle", function()
-    it("should handle patch failure and unpatch gracefully", function()
+    it("should patch then unpatch and restore original", function()
       setup()
       
       -- Create both regular and esm app-index.js files
@@ -331,18 +407,68 @@ if (typeof window !== 'undefined') {
       local app_index_path = create_app_index_file(original_content)
       local esm_app_index_path = create_esm_app_index_file(original_content)
       
-      -- In test environment, patch fails
       local ws_port = 9999
       local patched = nextjs_injector.patch(project_root, ws_port)
-      assert.is_false(patched, "Should return false when inject script not found")
+      assert.is_true(patched, "Should successfully patch")
       
-      -- Unpatch should not error even with no backups
       nextjs_injector.unpatch(project_root)
       
-      -- Verify files are unchanged
-      local content = read_file_content(app_index_path)
-      assert.equals(content, original_content, "app-index.js should remain unchanged")
+      local restored_content = read_file_content(app_index_path)
+      assert.equals(restored_content, original_content, "app-index.js should be restored to original")
+
+      cleanup()
+    end)
+  end)
+
+  describe("is_patched", function()
+    it("should return true after successful patch", function()
+      setup()
+
+      local original_content = [[
+'use client'
+if (typeof window !== 'undefined') {
+  console.log('Hello from Next.js');
+}
+]]
+
+      create_app_index_file(original_content)
+
+      nextjs_injector.patch(project_root, 9999)
+
+      local is_patched, count = nextjs_injector.is_patched(project_root)
+      assert.is_true(is_patched, "Should report as patched after patching")
+      assert.equals(1, count, "Should report one patched file")
       
+      cleanup()
+    end)
+
+    it("should return false for clean file with stale backup", function()
+      setup()
+
+      local original_content = [[
+'use client'
+if (typeof window !== 'undefined') {
+  console.log('Hello from Next.js');
+}
+]]
+
+      local app_index_path = create_app_index_file(original_content)
+      vim.fn.writefile(vim.split(original_content, "\n"), app_index_path .. ".bk")
+
+      local is_patched, count = nextjs_injector.is_patched(project_root)
+      assert.is_false(is_patched, "Should not report as patched when file is clean")
+      assert.equals(0, count, "Should report zero patched files for clean file with stale backup")
+
+      local clean_content = read_file_content(app_index_path)
+      nextjs_injector.unpatch(project_root)
+      assert.equals(clean_content, read_file_content(app_index_path), "Clean file should remain unchanged after unpatch")
+      assert.is_false(vim.fn.filereadable(app_index_path .. ".bk") == 1, "Stale backup should be deleted after unpatch")
+
+      vim.fn.writefile({ "stale dependency content" }, app_index_path .. ".bk")
+      nextjs_injector.patch(project_root, 9999)
+      nextjs_injector.unpatch(project_root)
+      assert.equals(clean_content, read_file_content(app_index_path), "Refreshed backup should restore current dependency content")
+
       cleanup()
     end)
   end)

@@ -1,5 +1,27 @@
 local M = {}
 
+local describe_stack = {}
+
+local function current_depth()
+  return #describe_stack
+end
+
+local function push_describe_context()
+  local ctx = { failed = false }
+  table.insert(describe_stack, ctx)
+  return ctx
+end
+
+local function pop_describe_context()
+  return table.remove(describe_stack)
+end
+
+local function mark_child_failed()
+  if #describe_stack > 0 then
+    describe_stack[#describe_stack].failed = true
+  end
+end
+
 M.assert = {
   equals = function(actual, expected, message)
     if actual ~= expected then
@@ -96,26 +118,41 @@ M.assert = {
 }
 
 M.describe = function(name, fn)
-  print("Testing: " .. name)
+  local depth = current_depth()
+  local indent = string.rep("  ", depth)
+  print(indent .. "Testing: " .. name)
+  local ctx = push_describe_context()
   local success, err = pcall(fn)
-  if success then
-    print("  ✓ " .. name .. " passed")
+  pop_describe_context()
+
+  local result_indent = string.rep("  ", depth + 1)
+  if success and not ctx.failed then
+    print(result_indent .. "✓ " .. name .. " passed")
     return true
   else
-    print("  ✗ " .. name .. " failed: " .. err)
-    print("FAILED: " .. name .. ": " .. tostring(err))
+    if not success then
+      print(result_indent .. "✗ " .. name .. " failed: " .. err)
+      print("FAILED: " .. name .. ": " .. tostring(err))
+    else
+      print(result_indent .. "✗ " .. name .. " failed (child test(s) failed)")
+      print("FAILED: " .. name)
+    end
+    mark_child_failed()
     return false
   end
 end
 
 M.it = function(name, fn)
+  local depth = current_depth()
+  local indent = string.rep("  ", depth + 1)
   local success, err = pcall(fn)
   if success then
-    print("    ✓ " .. name)
+    print(indent .. "✓ " .. name)
     return true
   else
-    print("    ✗ " .. name .. ": " .. err)
+    print(indent .. "✗ " .. name .. ": " .. err)
     print("FAILED: " .. name .. ": " .. tostring(err))
+    mark_child_failed()
     return false
   end
 end

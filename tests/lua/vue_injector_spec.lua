@@ -116,15 +116,19 @@ describe("Vue Injector Tests", function()
   end)
   
   describe("Vue Patching", function()
-    it("should handle missing inject script gracefully", function()
+    it("should successfully patch Vue files", function()
       setup()
       create_package_json('{"dependencies": {"vue": "^3.5.0"}}')
       local runtime_path, esm_path, runtime_dom_path, vite_plugin_path = create_vue_files()
       
-      -- In test environment, injector cannot locate plugin directory,
-      -- so patch returns false gracefully
       local success = vue_injector.patch(project_root, 19990)
-      assert.is_false(success, "Should return false when inject script not found")
+      assert.is_true(success, "Should successfully patch Vue files")
+
+      local runtime_content = read_file_content(runtime_path)
+      assert.is_true(has_injection(runtime_content), "vue.runtime.esm-browser.js should contain injection")
+      assert.is_true(runtime_content:find("window.__CONSOLELOG_WS_PORT = 19990") ~= nil,
+        "Patched content should contain port 19990")
+      assert.is_true(backup_exists(runtime_path), "vue.runtime.esm-browser.js backup should exist")
       
       cleanup()
     end)
@@ -140,14 +144,57 @@ describe("Vue Injector Tests", function()
       cleanup()
     end)
     
-    it("should handle re-patch gracefully when inject script not found", function()
+    it("should re-patch with updated port", function()
       setup()
       create_package_json('{"dependencies": {"vue": "^3.5.0"}}')
       local runtime_path, esm_path, runtime_dom_path, vite_plugin_path = create_vue_files()
       
-      -- In test environment, injector cannot locate plugin directory
+      vue_injector.patch(project_root, 8888)
+
       local success = vue_injector.patch(project_root, 19991)
-      assert.is_false(success, "Should return false when inject script not found")
+      assert.is_true(success, "Should successfully re-patch")
+
+      local patched_content = read_file_content(runtime_path)
+      assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 19991") ~= nil,
+        "Re-patched content should contain new port 19991")
+      assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 8888") == nil,
+        "Re-patched content should not contain old port 8888")
+
+      cleanup()
+    end)
+
+    it("should upgrade legacy injection without start/end markers", function()
+      setup()
+      create_package_json('{"dependencies": {"vue": "^3.5.0"}}')
+      local runtime_path, esm_path, runtime_dom_path, vite_plugin_path = create_vue_files()
+
+      local original_runtime = read_file_content(runtime_path)
+      vim.fn.writefile(vim.split(original_runtime, "\n"), runtime_path .. ".bk")
+
+      local legacy_content = [[
+'use strict';
+if (typeof window !== 'undefined') {
+  window.__CONSOLELOG_WS_PORT = 8888;
+  window.__CONSOLELOG_PROJECT_ID = 'test-project';
+  window.__CONSOLELOG_FRAMEWORK = 'Vue';
+  window.__CONSOLELOG_DEBUG = true;
+}
+function createApp() {
+  return {};
+}
+]]
+      vim.fn.writefile(vim.split(legacy_content, "\n"), runtime_path)
+
+      local success = vue_injector.patch(project_root, 19991)
+      assert.is_true(success, "Should successfully upgrade legacy injection")
+
+      local patched_content = read_file_content(runtime_path)
+      assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 19991") ~= nil,
+        "Upgraded content should contain new port 19991")
+      assert.is_true(patched_content:find("window.__CONSOLELOG_WS_PORT = 8888") == nil,
+        "Upgraded content should not contain legacy port 8888")
+      local _, start_count = patched_content:gsub("// ConsoleLog%.nvim auto%-injection start", "")
+      assert.equals(1, start_count, "Should contain exactly one start marker")
       
       cleanup()
     end)
@@ -166,7 +213,7 @@ describe("Vue Injector Tests", function()
       vim.fn.writefile(vim.split(original_runtime, "\n"), runtime_path .. ".bk")
 
       -- Overwrite file with patched content
-      vim.fn.writefile(vim.split(original_runtime .. "\n// injected", "\n"), runtime_path)
+      vim.fn.writefile(vim.split(original_runtime .. "\nwindow.__CONSOLELOG_WS_PORT = 19990;", "\n"), runtime_path)
       
       -- Unpatch should restore from backup
       vue_injector.unpatch(project_root)
@@ -192,18 +239,48 @@ describe("Vue Injector Tests", function()
       
       cleanup()
     end)
+
+    it("should remove bounded marker block when backup is missing", function()
+      setup()
+      create_package_json('{"dependencies": {"vue": "^3.5.0"}}')
+      local runtime_path, esm_path, runtime_dom_path, vite_plugin_path = create_vue_files()
+
+      local marker_block = "// ConsoleLog.nvim auto-injection start\n" ..
+        "if (typeof window !== 'undefined') {\n" ..
+        "  window.__CONSOLELOG_WS_PORT = 19990;\n" ..
+        "  window.__CONSOLELOG_PROJECT_ID = 'test';\n" ..
+        "  window.__CONSOLELOG_FRAMEWORK = 'Vue';\n" ..
+        "  window.__CONSOLELOG_DEBUG = true;\n" ..
+        "}\n" ..
+        "// ConsoleLog.nvim auto-injection end\n"
+
+      local file_with_marker = "/**\n* Vue.js v3.5.0\n*/\n" .. marker_block ..
+        "'use strict';\nfunction createApp() {\n  return {};\n}\n"
+      vim.fn.writefile(vim.split(file_with_marker, "\n"), runtime_path)
+
+      vue_injector.unpatch(project_root)
+
+      local result = read_file_content(runtime_path)
+      assert.is_true(result:find("ConsoleLog%.nvim auto%-injection") == nil,
+        "Marker block should be removed when backup is missing")
+      assert.is_true(result:find("function createApp") ~= nil,
+        "Surrounding original code should be preserved")
+
+      cleanup()
+    end)
   end)
   
   describe("Vue is_patched", function()
-    it("should return false when patch was not applied", function()
+    it("should return true after successful patch", function()
       setup()
       create_package_json('{"dependencies": {"vue": "^3.5.0"}}')
       create_vue_files()
       
-      -- patch() failed, so no backup files were created
+      vue_injector.patch(project_root, 19990)
+
       local is_patched, count = vue_injector.is_patched(project_root)
-      assert.is_false(is_patched, "Should report as not patched when patch failed")
-      assert.equals(0, count, "Should report zero patched files")
+      assert.is_true(is_patched, "Should report as patched after patching")
+      assert.is_true(count > 0, "Should report at least one patched file")
       
       cleanup()
     end)
@@ -217,6 +294,30 @@ describe("Vue Injector Tests", function()
       assert.is_false(is_patched, "Should report as not patched")
       assert.equals(0, count, "Should report zero patched files")
       
+      cleanup()
+    end)
+
+    it("should return false for clean file with stale backup", function()
+      setup()
+      create_package_json('{"dependencies": {"vue": "^3.5.0"}}')
+      local runtime_path, esm_path, runtime_dom_path, vite_plugin_path = create_vue_files()
+
+      vim.fn.writefile(vim.split(read_file_content(runtime_path), "\n"), runtime_path .. ".bk")
+
+      local is_patched, count = vue_injector.is_patched(project_root)
+      assert.is_false(is_patched, "Should not report as patched when file is clean")
+      assert.equals(0, count, "Should report zero patched files for clean file with stale backup")
+
+      local clean_content = read_file_content(runtime_path)
+      vue_injector.unpatch(project_root)
+      assert.equals(clean_content, read_file_content(runtime_path), "Clean file should remain unchanged after unpatch")
+      assert.is_false(backup_exists(runtime_path), "Stale backup should be deleted after unpatch")
+
+      vim.fn.writefile({ "stale dependency content" }, runtime_path .. ".bk")
+      vue_injector.patch(project_root, 19990)
+      vue_injector.unpatch(project_root)
+      assert.equals(clean_content, read_file_content(runtime_path), "Refreshed backup should restore current dependency content")
+
       cleanup()
     end)
   end)
