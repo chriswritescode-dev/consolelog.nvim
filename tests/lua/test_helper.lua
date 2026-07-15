@@ -103,6 +103,7 @@ M.describe = function(name, fn)
     return true
   else
     print("  ✗ " .. name .. " failed: " .. err)
+    print("FAILED: " .. name .. ": " .. tostring(err))
     return false
   end
 end
@@ -114,6 +115,7 @@ M.it = function(name, fn)
     return true
   else
     print("    ✗ " .. name .. ": " .. err)
+    print("FAILED: " .. name .. ": " .. tostring(err))
     return false
   end
 end

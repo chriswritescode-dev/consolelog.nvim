@@ -35,8 +35,11 @@ function M.get_highlight_groups(console_type)
 end
 
 function M.format_value_for_display(value, raw_value, config)
-  local display_value = raw_value or value
-  return formatter.format_for_inline(display_value, config)
+  -- Always use `value` for inline virtual text.  `raw_value` carries the
+  -- full representation (parsed table or multiline exception stack) that the
+  -- float inspector should show; forcing it inline would flatten exception
+  -- stacks into a single display line.
+  return formatter.format_for_inline(value, config)
 end
 
 function M.add_execution_count(text, count, config)

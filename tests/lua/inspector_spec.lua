@@ -6,6 +6,12 @@ local it = helper.it
 package.path = package.path .. ";./lua/?.lua"
 local inspector = require('consolelog.communication.inspector')
 
+local function setup()
+  inspector.stop_all_sessions()
+  inspector.sessions = {}
+  inspector.reconnect_attempts = {}
+end
+
 describe("Inspector Module", function()
   local test_bufnr = 1
   local test_filepath = "/tmp/test.js"

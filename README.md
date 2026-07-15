@@ -12,7 +12,7 @@ A Neovim plugin that captures and displays console outputs as virtual text inlin
 
 - Real-time Console Capture - See console outputs instantly as virtual text next to your code
 - Browser Support - Automatic console capture for Next.js, React, Vue, and Vite projects
-- Single-File Runner - Run standalone `.js` files with console capture via Node.js Inspector
+- Single-File Runner - Run standalone `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, and `.cts` files with console capture via Node.js Inspector
 - Smart Object Display - Inline previews for small objects, floating inspector for large ones
 - Zero Config - Works out of the box with intelligent project detection
 - Accurate Line Mapping - Outputs appear exactly where they're logged using source maps
@@ -52,9 +52,11 @@ ConsoleLog automatically detects your project type and enables console capture:
 ### Project-Specific Behavior
 
 **Single-File Execution** (`:ConsoleLogRun` or `<leader>lr`):
-- Supports: `.js` files only
+- Supports: `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts` files
+- TypeScript requires Node >= 22.6 (native from 23.6; `--experimental-strip-types` added automatically for 22.6–23.5). Node type stripping supports only erasable TypeScript syntax and does not apply `tsconfig` transforms.
 - Runs via Node.js Inspector with console capture
-- Perfect for quick scripts and standalone JavaScript files
+- Auto re-runs on save for buffers previously run with `:ConsoleLogRun` (configurable via `runner.rerun_on_save`)
+- Perfect for quick scripts and standalone JavaScript/TypeScript files
 
 **Browser Framework Projects** (automatic):
 - Supports: `.js`, `.jsx`, `.ts`, `.tsx`
@@ -130,6 +132,9 @@ The plugin works out of the box with sensible defaults. Here's the full configur
         auto_resume = true,      -- Auto-resume inspector on new output
         capture_exceptions = true, -- Capture uncaught exceptions
         console_methods = { "log", "error", "warn", "info", "debug" }, -- Methods to capture
+      },
+      runner = {
+        rerun_on_save = true,    -- Re-run single-file buffers on save after :ConsoleLogRun
       },
       keymaps = {
         enabled = true,          -- Enable default keymaps
@@ -213,4 +218,3 @@ make test
 ## License
 
 MIT
-

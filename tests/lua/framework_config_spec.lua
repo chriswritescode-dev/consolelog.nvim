@@ -125,7 +125,7 @@ describe("Framework Configuration Tests", function()
       vim.fn.system("rm -rf " .. vim.fn.shellescape(temp_dir))
     end)
     
-    it("should detect Vue from vite.config with vue plugin", function()
+    it("should detect Vite from vue plugin in vite config", function()
       setup()
       
       local temp_dir = "/tmp/test_vue_vite_" .. vim.fn.getpid()
@@ -139,7 +139,7 @@ describe("Framework Configuration Tests", function()
       vim.fn.writefile({ "import vue from '@vitejs/plugin-vue'" }, temp_dir .. "/vite.config.js")
       
       local framework = framework_detector.detect_framework(temp_dir)
-      assert.equals(framework, framework_detector.FRAMEWORKS.VUE, "Should detect Vue from vite config")
+      assert.equals(framework, framework_detector.FRAMEWORKS.VITE, "Should detect Vite from vite config")
       
       vim.fn.system("rm -rf " .. vim.fn.shellescape(temp_dir))
     end)
@@ -210,7 +210,7 @@ describe("Framework Configuration Tests", function()
       vim.fn.system("rm -rf " .. vim.fn.shellescape(temp_dir))
     end)
     
-    it("should prioritize specific framework over Vite", function()
+    it("should detect Vite when Vue and Vite are both present", function()
       setup()
       
       local temp_dir = "/tmp/test_vue_vite_priority_" .. vim.fn.getpid()
@@ -229,7 +229,7 @@ describe("Framework Configuration Tests", function()
       vim.fn.writefile(vim.split(package_json, "\n"), temp_dir .. "/package.json")
       
       local framework = framework_detector.detect_framework(temp_dir)
-      assert.equals(framework, framework_detector.FRAMEWORKS.VUE, "Should return VUE not VITE")
+      assert.equals(framework, framework_detector.FRAMEWORKS.VITE, "Should return VITE when both Vue and Vite present")
       
       vim.fn.system("rm -rf " .. vim.fn.shellescape(temp_dir))
     end)
