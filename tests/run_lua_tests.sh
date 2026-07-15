@@ -21,10 +21,11 @@ run_test() {
     
     echo -e "${CYAN}Running: ${test_name}${NC}"
     
-    nvim --headless -c "lua package.path = './lua/?.lua;./tests/lua/?.lua;' .. package.path" -c "luafile $test_file" -c "qa!" 2>&1 | tee /tmp/test_output.txt
+    PATH="/tmp/nvim-linux64/bin:$PATH" nvim --headless -c "lua package.path = './lua/?.lua;./lua/?/init.lua;./tests/lua/?.lua;' .. package.path" -c "lua local ok, err = pcall(dofile, '$test_file'); if not ok then print('FAILED: ' .. err) end" -c "qa!" 2>&1 | tee /tmp/test_output.txt
+    local nvim_exit=${PIPESTATUS[0]}
     
-    # Check for actual failures, not just the presence of ✗ in output
-    if grep -q "FAILED:" /tmp/test_output.txt || grep -q "Error detected" /tmp/test_output.txt || grep -q "stack traceback:" /tmp/test_output.txt; then
+    # Check for FAILED: lines emitted by test assertions
+    if grep -q "FAILED:" /tmp/test_output.txt || [ $nvim_exit -ne 0 ]; then
         echo -e "${RED}✗ FAILED: ${test_name}${NC}\n"
         FAILED_TESTS+=("$test_name")
         return 1

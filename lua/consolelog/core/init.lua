@@ -74,6 +74,7 @@ M.config = {
 	runner = {
 		command = nil,
 		use_inspector = true,
+		rerun_on_save = true,
 	},
 	keymaps = {
 		enabled = true,
@@ -219,6 +220,9 @@ function M.disable()
 	local inspector = require("consolelog.communication.inspector")
 	inspector.stop_all_sessions()
 
+	-- Invalidate any deferred rerun callbacks queued before this disable
+	require("consolelog.core.autocmds").invalidate_reruns()
+
 	M.clear()
 
 	M.notify("ConsoleLog disabled", vim.log.levels.INFO)
@@ -262,13 +266,12 @@ function M.clear_cache()
 	vim.notify("Build tool caches cleared", vim.log.levels.INFO)
 end
 
-function M.run()
-	local bufnr = vim.api.nvim_get_current_buf()
+function M.run_buffer(bufnr)
 	local filepath = vim.api.nvim_buf_get_name(bufnr)
 	local constants = require("consolelog.core.constants")
 
 	if not constants.is_single_file_runnable(filepath) then
-		M.notify("ConsoleLogRun only supports .js files. For TypeScript/.jsx/.tsx, use a browser framework project.", vim.log.levels.ERROR)
+		M.notify("ConsoleLogRun supports .js/.mjs/.cjs/.ts/.mts/.cts files.", vim.log.levels.ERROR)
 		return
 	end
 
@@ -283,6 +286,9 @@ function M.run()
 
 	local inspector = require("consolelog.communication.inspector")
 	
+	-- Clear any stale outputs from previous runs (including completed sessions)
+	require("consolelog.display.display").clear_buffer(bufnr)
+
 	local existing_session = inspector.get_session_for_buffer(bufnr)
 	if existing_session then
 		inspector.cleanup_session(existing_session)
@@ -295,6 +301,10 @@ function M.run()
 	else
 		M.notify("Failed to start debug session", vim.log.levels.ERROR)
 	end
+end
+
+function M.run()
+	M.run_buffer(vim.api.nvim_get_current_buf())
 end
 
 function M.toggle_output_window()

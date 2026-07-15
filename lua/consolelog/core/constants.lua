@@ -43,7 +43,8 @@ M.DISPLAY = {
 }
 
 M.FILE_PATTERNS = {
-	JAVASCRIPT_SINGLE = { "%.js$" },
+	JAVASCRIPT_SINGLE = { "%.js$", "%.mjs$", "%.cjs$", "%.ts$", "%.mts$", "%.cts$" },
+	TYPESCRIPT = { "%.ts$", "%.mts$", "%.cts$" },
 	FRAMEWORK_SUPPORTED = { "%.js$", "%.jsx$", "%.ts$", "%.tsx$" }
 }
 
@@ -101,6 +102,15 @@ end
 
 function M.is_framework_supported(filepath)
 	for _, pattern in ipairs(M.FILE_PATTERNS.FRAMEWORK_SUPPORTED) do
+		if filepath:match(pattern) then
+			return true
+		end
+	end
+	return false
+end
+
+function M.is_typescript_file(filepath)
+	for _, pattern in ipairs(M.FILE_PATTERNS.TYPESCRIPT) do
 		if filepath:match(pattern) then
 			return true
 		end

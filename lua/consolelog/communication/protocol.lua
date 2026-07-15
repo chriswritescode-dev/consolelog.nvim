@@ -1,16 +1,21 @@
 local M = {}
 
-local display = require("consolelog.display.display")
-
 M.pending_responses = {}
+
+local CONSOLE_TYPE_MAP = {
+	error = "error",
+	warning = "warn",
+	warn = "warn",
+	info = "info",
+	debug = "debug",
+	log = "log",
+}
 
 function M.handle_message(session, raw_message)
 	local ok, message = pcall(vim.json.decode, raw_message)
 	if not ok then
 		return
 	end
-
-
 
 	if message.method then
 		M.handle_event(session, message)
@@ -33,52 +38,136 @@ function M.handle_event(session, message)
 	end
 end
 
-function M.handle_console_event(session, params)
-	local console_type = params.type
-	local args = params.args or {}
+function M.remote_object_to_arg(arg)
+	if arg.type == "string" then
+		return arg.value
+	elseif arg.type == "number" then
+		return arg.unserializableValue or arg.value
+	elseif arg.type == "boolean" then
+		return arg.value
+	elseif arg.type == "undefined" then
+		return "undefined"
+	elseif arg.type == "bigint" then
+		return arg.unserializableValue or arg.description or tostring(arg.value)
+	elseif arg.type == "symbol" then
+		return arg.description or "Symbol()"
+	elseif arg.type == "function" then
+		return M.format_function_preview(arg)
+	elseif arg.type == "object" then
+		if arg.subtype == "null" then
+			return "null"
+		elseif arg.subtype == "map" then
+			return M.format_map_preview(arg)
+		elseif arg.subtype == "set" then
+			return M.format_set_preview(arg)
+		elseif arg.subtype == "regexp" or arg.subtype == "date" or arg.subtype == "error" then
+			return arg.description or ("[" .. (arg.subtype or "Object") .. "]")
+		elseif arg.subtype == "array" or arg.preview then
+			if arg.preview then
+				return vim.json.encode(M.preview_to_table(arg.preview))
+			end
+			return arg.description or "[Object]"
+		else
+			return arg.description or "[Object]"
+		end
+	else
+		return arg.description or arg.value or tostring(arg.type)
+	end
+end
 
-	if #args == 0 then
-		return
+function M.preview_to_table(preview)
+	if not preview or not preview.properties then
+		return {}
 	end
 
-	local values = {}
-	local raw_values = {}
-	for _, arg in ipairs(args) do
-		local value = M.extract_value(arg)
-		table.insert(values, value)
-		-- Store raw JSON for objects/arrays
-		if arg.type == "object" and arg.preview then
-			table.insert(raw_values, vim.json.encode(arg))
-		else
-			table.insert(raw_values, value)
+	local is_array = preview.subtype == "array"
+	local result = {}
+
+	if is_array then
+		-- Sort by numeric name to ensure correct array order (CDP may send
+		-- properties in any order). CDP uses 0-based indexing.
+		local sorted = {}
+		for _, prop in ipairs(preview.properties) do
+			local idx = tonumber(prop.name)
+			if idx then
+				table.insert(sorted, { idx = idx, prop = prop })
+			end
+		end
+		table.sort(sorted, function(a, b) return a.idx < b.idx end)
+		for _, entry in ipairs(sorted) do
+			local prop = entry.prop
+			local val
+			if prop.valuePreview then
+				val = prop.valuePreview.subtype == "array" and "[...]" or "{...}"
+			elseif prop.type == "number" then
+				val = tonumber(prop.value)
+			elseif prop.type == "string" then
+				val = prop.value
+			elseif prop.type == "boolean" then
+				val = prop.value == "true"
+			elseif prop.type == "object" then
+				if prop.subtype == "array" then
+					val = "[...]"
+				else
+					val = "{...}"
+				end
+			else
+				val = prop.value
+			end
+			table.insert(result, val)
+		end
+		if preview.overflow then
+			table.insert(result, "...")
+		end
+	else
+		for _, prop in ipairs(preview.properties) do
+			if prop.valuePreview then
+				result[prop.name] = prop.valuePreview.subtype == "array" and "[...]" or "{...}"
+			elseif prop.type == "number" then
+				result[prop.name] = tonumber(prop.value)
+			elseif prop.type == "string" then
+				result[prop.name] = prop.value
+			elseif prop.type == "boolean" then
+				result[prop.name] = prop.value == "true"
+			elseif prop.type == "object" then
+				if prop.subtype == "array" then
+					result[prop.name] = "[...]"
+				else
+					result[prop.name] = "{...}"
+				end
+			else
+				result[prop.name] = prop.value
+			end
+		end
+		if preview.overflow then
+			result["..."] = "..."
 		end
 	end
 
-	local output_text = table.concat(values, " ")
-	local raw_text = nil
+	return result
+end
 
-	-- If we have a single object/array, store its raw value
-	if #args == 1 and args[1].type == "object" then
-		raw_text = vim.json.encode(args[1])
-	elseif #raw_values > 0 then
-		raw_text = table.concat(raw_values, " ")
+function M.handle_console_event(session, params)
+	local args = params.args or {}
+
+	local method = CONSOLE_TYPE_MAP[params.type] or "log"
+	local line = M.extract_line_number(params.stackTrace, session.filepath)
+	if not line then
+		return
 	end
 
-	if console_type == "error" then
-		output_text = "❌ " .. output_text
-	elseif console_type == "warn" then
-		output_text = "⚠️  " .. output_text
-	elseif console_type == "info" then
-		output_text = "ℹ️  " .. output_text
-	elseif console_type == "debug" then
-		output_text = "🐛 " .. output_text
+	local converted = {}
+	for _, arg in ipairs(args) do
+		table.insert(converted, M.remote_object_to_arg(arg))
 	end
 
-	local line_number = M.extract_line_number(params.stackTrace, session.filepath)
+	local display = require("consolelog.display.display")
+	local message_processor = require("consolelog.processing.message_processor_impl")
 
-	if line_number then
-		display.update_output(session.bufnr, line_number, output_text, console_type, raw_text)
-	end
+	vim.schedule(function()
+		local output, raw_value = message_processor.format_args(converted, method)
+		display.update_output(session.bufnr, line, output, method, raw_value)
+	end)
 end
 
 function M.handle_exception_event(session, params)
@@ -87,153 +176,29 @@ function M.handle_exception_event(session, params)
 		return
 	end
 
-	local text = exception.text or "Unknown exception"
-	if exception.exception and exception.exception.description then
-		text = exception.exception.description
-	end
+	local desc = exception.exception and exception.exception.description
+		or exception.text
+		or "Uncaught exception"
 
-	local line_number = nil
+	local line = nil
 	if exception.stackTrace then
-		line_number = M.extract_line_number(exception.stackTrace, session.filepath)
-	elseif exception.lineNumber then
-		line_number = exception.lineNumber
+		line = M.extract_line_number(exception.stackTrace, session.filepath)
+	end
+	if not line and exception.lineNumber then
+		line = exception.lineNumber + 1
 	end
 
-	if line_number then
-		display.update_output(session.bufnr, line_number, "💥 " .. text, "error")
+	if not line then
+		return
 	end
-end
 
-function M.extract_value(arg)
-	if arg.type == "string" then
-		return arg.value
-	elseif arg.type == "number" then
-		return tostring(arg.value)
-	elseif arg.type == "boolean" then
-		return tostring(arg.value)
-	elseif arg.type == "undefined" then
-		return "undefined"
-	elseif arg.type == "symbol" then
-		return arg.description or "Symbol()"
-	elseif arg.type == "bigint" then
-		return tostring(arg.value) .. "n"
-	elseif arg.type == "object" then
-		if arg.subtype == "null" then
-			return "null"
-		elseif arg.subtype == "array" then
-			return M.format_array_preview(arg)
-		elseif arg.subtype == "regexp" then
-			return arg.description or "/regex/"
-		elseif arg.subtype == "date" then
-			return arg.description or "Date"
-		elseif arg.subtype == "map" then
-			return M.format_map_preview(arg)
-		elseif arg.subtype == "set" then
-			return M.format_set_preview(arg)
-		elseif arg.subtype == "error" then
-			return arg.description or "Error"
-		else
-			return M.format_object_preview(arg)
-		end
-	elseif arg.type == "function" then
-		return M.format_function_preview(arg)
-	else
-		return vim.inspect(arg.value or arg.description or arg.type)
-	end
-end
+	local text = desc:match("[^\n]+") or desc
 
-function M.format_array_preview(arg)
-	if arg.preview and arg.preview.properties then
-		local items = {}
-		local count = 0
-		for _, prop in ipairs(arg.preview.properties) do
-			if prop.name and tonumber(prop.name) then
-				count = count + 1
-				if count <= 5 then
-					table.insert(items, prop.value or "...")
-				end
-			end
-		end
-		if count > 5 then
-			table.insert(items, "...")
-		end
-		return "[" .. table.concat(items, ", ") .. "]"
-	end
-	return arg.description or "[]"
-end
+	local display = require("consolelog.display.display")
 
-function M.format_object_preview(arg)
-	if arg.className then
-		return "[" .. arg.className .. "]"
-	elseif arg.preview and arg.preview.properties then
-		local props = {}
-		for i, prop in ipairs(arg.preview.properties) do
-			if i <= 3 then
-				local value = prop.value or "..."
-				if prop.valuePreview then
-					value = M.format_value_preview(prop.valuePreview)
-				end
-				table.insert(props, prop.name .. ": " .. value)
-			end
-		end
-		if #arg.preview.properties > 3 then
-			table.insert(props, "...")
-		end
-		return "{ " .. table.concat(props, ", ") .. " }"
-	end
-	return arg.description or "{}"
-end
-
-function M.format_value_preview(preview)
-	if preview.type == "object" then
-		if preview.subtype == "array" then
-			return "[...]"
-		else
-			return "{...}"
-		end
-	else
-		return preview.value or preview.description or "..."
-	end
-end
-
-function M.format_map_preview(arg)
-	if arg.preview and arg.preview.entries then
-		local entries = {}
-		for i, entry in ipairs(arg.preview.entries) do
-			if i <= 3 then
-				local key = entry.key and entry.key.value or "?"
-				local value = entry.value and entry.value.value or "?"
-				table.insert(entries, key .. " => " .. value)
-			end
-		end
-		if #arg.preview.entries > 3 then
-			table.insert(entries, "...")
-		end
-		return "Map { " .. table.concat(entries, ", ") .. " }"
-	end
-	return arg.description or "Map {}"
-end
-
-function M.format_set_preview(arg)
-	if arg.preview and arg.preview.entries then
-		local values = {}
-		for i, entry in ipairs(arg.preview.entries) do
-			if i <= 5 then
-				table.insert(values, entry.value and entry.value.value or "?")
-			end
-		end
-		if #arg.preview.entries > 5 then
-			table.insert(values, "...")
-		end
-		return "Set { " .. table.concat(values, ", ") .. " }"
-	end
-	return arg.description or "Set {}"
-end
-
-function M.format_function_preview(arg)
-	local name = arg.description or "anonymous"
-	name = name:match("^function%s+(%w+)") or name:match("^(%w+)") or "anonymous"
-	return "[Function: " .. name .. "]"
+	vim.schedule(function()
+		display.update_output(session.bufnr, line, text, "error", desc)
+	end)
 end
 
 function M.extract_line_number(stackTrace, filepath)
@@ -265,6 +230,46 @@ function M.extract_line_number(stackTrace, filepath)
 	return nil
 end
 
+function M.format_function_preview(arg)
+	local name = arg.description or "anonymous"
+	name = name:match("^function%s+(%w+)") or name:match("^(%w+)") or "anonymous"
+	return "[Function: " .. name .. "]"
+end
+
+function M.format_map_preview(arg)
+	if arg.preview and arg.preview.entries then
+		local entries = {}
+		for i, entry in ipairs(arg.preview.entries) do
+			if i <= 3 then
+				local key = entry.key and (entry.key.description or entry.key.value) or "?"
+				local value = entry.value and (entry.value.description or entry.value.value) or "?"
+				table.insert(entries, key .. " => " .. value)
+			end
+		end
+		if #arg.preview.entries > 3 then
+			table.insert(entries, "...")
+		end
+		return "Map { " .. table.concat(entries, ", ") .. " }"
+	end
+	return arg.description or "Map {}"
+end
+
+function M.format_set_preview(arg)
+	if arg.preview and arg.preview.entries then
+		local values = {}
+		for i, entry in ipairs(arg.preview.entries) do
+			if i <= 5 then
+				table.insert(values, entry.value and (entry.value.description or entry.value.value) or "?")
+			end
+		end
+		if #arg.preview.entries > 5 then
+			table.insert(values, "...")
+		end
+		return "Set { " .. table.concat(values, ", ") .. " }"
+	end
+	return arg.description or "Set {}"
+end
+
 function M.handle_response(session, message)
 	if M.pending_responses[message.id] then
 		local callback = M.pending_responses[message.id]
@@ -284,4 +289,3 @@ function M.register_response_callback(id, callback)
 end
 
 return M
-

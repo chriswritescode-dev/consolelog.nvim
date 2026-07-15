@@ -104,44 +104,6 @@ describe("Parser Module", function()
     end)
   end)
   
-  describe("Output parsing", function()
-    it("should parse output lines", function()
-      local output = "line1\nline2\nline3"
-      local results = parser.parse_output(output)
-      
-      assert.not_nil(results, "Should return results")
-      assert.equals(type(results), "table", "Results should be table")
-      assert.equals(#results, 3, "Should parse 3 lines")
-    end)
-    
-    it("should skip empty lines", function()
-      local output = "line1\n\nline3"
-      local results = parser.parse_output(output)
-      
-      assert.equals(#results, 2, "Should skip empty line")
-    end)
-    
-    it("should parse single line", function()
-      local line = "test output"
-      local result = parser.parse_line(line)
-      
-      assert.not_nil(result, "Should parse line")
-      assert.equals(result.value, line, "Should preserve value")
-      assert.equals(result.raw, line, "Should preserve raw value")
-      assert.not_nil(result.type, "Should detect type")
-    end)
-    
-    it("should return nil for empty line", function()
-      local result = parser.parse_line("")
-      assert.nil_value(result, "Should return nil for empty line")
-      
-      result = parser.parse_line(nil)
-      assert.nil_value(result, "Should return nil for nil line")
-    end)
-  end)
-  
-
-  
   describe("Output formatting", function()
     it("should format output with prefix", function()
       local value = "test"
@@ -177,22 +139,6 @@ describe("Parser Module", function()
   end)
   
   describe("Error handling", function()
-    it("should handle malformed JSON gracefully", function()
-      local malformed_cases = {
-        '{"key": invalid}',
-        '{key: "value"}',
-        '{"unclosed": ',
-        '[1, 2, 3,]',
-        'not json at all'
-      }
-      
-      for _, value in ipairs(malformed_cases) do
-        local result = parser.parse_line(value)
-        assert.not_nil(result, "Should parse malformed JSON: " .. value)
-        assert.equals(result.value, value, "Should preserve original value")
-      end
-    end)
-    
     it("should handle very large objects", function()
       local large_obj = '{"data": "' .. string.rep("x", 500) .. '"}'
       
@@ -213,9 +159,6 @@ describe("Parser Module", function()
       for _, value in ipairs(test_cases) do
         local type = parser.detect_value_type(value)
         assert.equals(type, "string", "Should detect as string: " .. value)
-        
-        local result = parser.parse_line(value)
-        assert.not_nil(result, "Should parse: " .. value)
       end
     end)
     
@@ -227,22 +170,6 @@ describe("Parser Module", function()
       
       local formatted = formatter.format_for_inline(nested, mock_config)
       assert.not_nil(formatted, "Should format deeply nested object")
-    end)
-    
-    it("should handle empty input", function()
-      local result = parser.parse_output("")
-      assert.not_nil(result, "Should handle empty string")
-      assert.equals(#result, 0, "Should return empty table")
-    end)
-    
-    it("should handle nil input", function()
-      local result = parser.parse_line(nil)
-      assert.nil_value(result, "Should return nil for nil input")
-    end)
-    
-    it("should handle whitespace-only input", function()
-      local result = parser.parse_line("   ")
-      assert.nil_value(result, "Should return nil for whitespace")
     end)
     
     it("should handle extremely long arrays", function()

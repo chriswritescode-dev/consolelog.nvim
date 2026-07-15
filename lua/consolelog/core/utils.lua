@@ -9,7 +9,7 @@ function M.is_javascript_file(file)
 		return false
 	end
 
-	return file:match("%.jsx?$") or file:match("%.tsx?$") or file:match("%.mjs$") or file:match("%.cjs$")
+	return file:match("%.jsx?$") or file:match("%.tsx?$") or file:match("%.mts$") or file:match("%.cts$") or file:match("%.mjs$") or file:match("%.cjs$")
 end
 
 function M.is_javascript_buffer(bufnr)

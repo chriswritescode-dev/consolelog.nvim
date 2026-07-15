@@ -7,6 +7,46 @@ M.reconnect_attempts = {}
 M.max_reconnect_attempts = 5
 M.reconnect_delay = constants.TIMING.RECONNECT_BASE_DELAY_MS
 M.auto_attach_timer = nil
+M.node_version = nil
+M._version_checked = false
+M.single_file_buffers = {}
+M._intentionally_stopped_jobs = {}
+
+function M.parse_node_version(version_string)
+	if not version_string then return nil end
+	local major, minor, patch = version_string:match("v(%d+)%.(%d+)%.(%d+)")
+	if not major then return nil end
+	return { major = tonumber(major), minor = tonumber(minor), patch = tonumber(patch) }
+end
+
+function M.build_run_command(filepath, version)
+	if not constants.is_typescript_file(filepath) then
+		return { "node", "--inspect=0", filepath }
+	end
+
+	if not version then
+		return nil, string.format("TypeScript single-file run requires Node >= 22.6 (found unknown)")
+	end
+
+	if version.major > 23 or (version.major == 23 and version.minor >= 6) then
+		return { "node", "--inspect=0", filepath }
+	end
+
+	if (version.major == 23 and version.minor < 6) or (version.major == 22 and version.minor >= 6) then
+		return { "node", "--inspect=0", "--experimental-strip-types", filepath }
+	end
+
+	return nil, string.format("TypeScript single-file run requires Node >= 22.6 (found v%d.%d.%d)",
+		version.major, version.minor, version.patch)
+end
+
+function M.get_node_version()
+	if M._version_checked then return M.node_version end
+	M._version_checked = true
+	local result = vim.fn.system({ "node", "--version" })
+	M.node_version = M.parse_node_version(result)
+	return M.node_version
+end
 
 function M.start_debug_session(filepath, bufnr)
 	local session = {
@@ -17,6 +57,7 @@ function M.start_debug_session(filepath, bufnr)
 		job_id = nil,
 		ready = false,
 		reconnecting = false,
+		completed = false,
 	}
 
 	session.job_id = M.start_node_inspect(filepath, function(url)
@@ -24,13 +65,14 @@ function M.start_debug_session(filepath, bufnr)
 		M.connect_to_inspector(session)
 	end)
 
-	if not session.job_id then
+	if session.job_id == nil or session.job_id <= 0 then
 		return nil
 	end
 
 	local session_id = tostring(session.job_id)
 	M.sessions[session_id] = session
 	M.reconnect_attempts[session_id] = 0
+	M.single_file_buffers[bufnr] = filepath
 
 	-- Timeout to clean up if inspector URL is never found
 	vim.defer_fn(function()
@@ -44,7 +86,11 @@ function M.start_debug_session(filepath, bufnr)
 end
 
 function M.start_node_inspect(filepath, on_url_found)
-	local cmd = { "node", "--inspect=0", filepath }
+	local cmd, err = M.build_run_command(filepath, M.get_node_version())
+	if not cmd then
+		vim.notify("ConsoleLog: " .. err, vim.log.levels.ERROR)
+		return nil
+	end
 	local inspector_url_found = false
 
 	return vim.fn.jobstart(cmd, {
@@ -63,14 +109,19 @@ function M.start_node_inspect(filepath, on_url_found)
 			end
 		end,
 		on_exit = function(job_id, exit_code)
+			local was_intentional = M._intentionally_stopped_jobs[job_id]
+			M._intentionally_stopped_jobs[job_id] = nil
+
 			local session_id = tostring(job_id)
 			local session = M.sessions[session_id]
 
 			if session then
-				session.job_id = nil
-			end
+			session.completed = true
+			session.job_id = nil
+			M.finalize_session(session)
+		end
 
-			if exit_code ~= 0 then
+			if exit_code ~= 0 and not was_intentional then
 				vim.notify("Process exited with code " .. exit_code, vim.log.levels.ERROR)
 			end
 		end,
@@ -141,6 +192,11 @@ function M.connect_to_inspector(session, is_reconnect)
 end
 
 function M.handle_connection_error(session)
+	if session.completed then
+		M.finalize_session(session)
+		return
+	end
+
 	if session.reconnecting then
 		return
 	end
@@ -160,11 +216,13 @@ function M.handle_connection_error(session)
 		local delay = M.reconnect_delay * math.pow(2, attempts - 1)
 
 		vim.defer_fn(function()
-			if M.sessions[session_id] and not session.reconnecting then
+			if M.sessions[session_id] and not session.reconnecting and not session.completed then
 				vim.notify(
 					string.format("Reconnection attempt %d/%d", attempts, M.max_reconnect_attempts),
 					vim.log.levels.INFO)
 				M.connect_to_inspector(session, true)
+			elseif session.completed and M.sessions[session_id] then
+				M.finalize_session(session)
 			end
 		end, delay)
 	else
@@ -206,81 +264,7 @@ function M.initialize_runtime(session)
 end
 
 function M.handle_inspector_message(session, message)
-	local debug_logger = require("consolelog.core.debug_logger")
-	debug_logger.log("INSPECTOR", "Received message: " .. message:sub(1, 200))
-
-	local data = vim.json.decode(message)
-
-	if not data then
-		debug_logger.log("INSPECTOR", "Failed to decode JSON message")
-		return
-	end
-
-	debug_logger.log("INSPECTOR", "Decoded method: " .. (data.method or "nil"))
-
-	-- Handle console messages
-	if data.method == "Runtime.consoleAPICalled" then
-		local console_data = data.params
-		if console_data and console_data.args then
-			debug_logger.log("INSPECTOR", "Console API called with " .. #console_data.args .. " args")
-
-			-- Schedule processing to avoid fast event context
-			vim.schedule(function()
-				-- Format all arguments into a single console text
-				local console_parts = {}
-				for _, arg in ipairs(console_data.args) do
-					debug_logger.log("INSPECTOR",
-						"Arg type: " ..
-						(arg.type or "nil") .. ", value: " .. tostring(arg.value or "nil"))
-					if arg.type == "string" then
-						table.insert(console_parts, arg.value or "")
-					elseif arg.type == "number" then
-						table.insert(console_parts, tostring(arg.value))
-					elseif arg.type == "boolean" then
-						table.insert(console_parts, tostring(arg.value))
-					elseif arg.type == "object" and arg.className then
-						table.insert(console_parts, "[" .. arg.className .. "]")
-					elseif arg.type == "undefined" then
-						table.insert(console_parts, "undefined")
-					elseif arg.type == "null" then
-						table.insert(console_parts, "null")
-					else
-						table.insert(console_parts, tostring(arg.value or arg.type))
-					end
-				end
-
-				local console_text = table.concat(console_parts, " ")
-				local location = console_data.stackTrace and console_data.stackTrace.callFrames[1]
-
-				if location then
-					debug_logger.log("INSPECTOR",
-						string.format(
-							"Location found: URL: %s | Line: %d | Column: %d | Func: %s | Text: %s",
-							location.url or "nil",
-							location.lineNumber or 0,
-							location.columnNumber or 0,
-							location.functionName or "nil",
-							console_text:sub(1, 50)))
-					local location_data = {
-						lineNumber = location.lineNumber,
-						columnNumber = location.columnNumber,
-						url = location.url,
-						functionName = location.functionName
-					}
-
-					-- Process the console message using the new line matching
-					local line_matching = require("consolelog.processing.line_matching")
-					line_matching.process_console_message(session.bufnr, console_text, location_data)
-				else
-					debug_logger.log("INSPECTOR", "No location found in stack trace")
-				end
-			end)
-		else
-			debug_logger.log("INSPECTOR", "No console data or args found")
-		end
-	elseif data.method then
-		debug_logger.log("INSPECTOR", "Unhandled method: " .. data.method)
-	end
+	require("consolelog.communication.protocol").handle_message(session, message)
 end
 
 function M.send_command(session, method, params)
@@ -313,21 +297,26 @@ function M.send_command(session, method, params)
 	return result
 end
 
+function M.finalize_session(session)
+	local session_id = M.get_session_id(session)
+	if session_id then
+		M.sessions[session_id] = nil
+		M.reconnect_attempts[session_id] = nil
+	end
+end
+
 function M.cleanup_session(session)
+	M.finalize_session(session)
+
 	if session.bufnr then
 		local display = require("consolelog.display.display")
 		display.clear_buffer(session.bufnr)
 	end
 
 	if session.job_id then
+		M._intentionally_stopped_jobs[session.job_id] = true
 		vim.fn.jobstop(session.job_id)
 		session.job_id = nil
-	end
-
-	local session_id = M.get_session_id(session)
-	if session_id then
-		M.sessions[session_id] = nil
-		M.reconnect_attempts[session_id] = nil
 	end
 end
 
@@ -337,6 +326,7 @@ function M.stop_all_sessions()
 	end
 	M.sessions = {}
 	M.reconnect_attempts = {}
+	M.single_file_buffers = {}
 end
 
 function M.get_session_for_buffer(bufnr)
@@ -355,6 +345,10 @@ function M.is_session_ready(session_id)
 	end
 
 	return session.ready and session.ws_id ~= nil
+end
+
+function M.is_single_file_buffer(bufnr)
+	return M.single_file_buffers[bufnr] ~= nil
 end
 
 function M.get_active_sessions()

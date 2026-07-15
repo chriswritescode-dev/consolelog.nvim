@@ -2,6 +2,16 @@ local M = {}
 
 local utils = require("consolelog.core.utils")
 
+-- Generation counter for invalidating stale deferred reruns.
+-- Incremented on disable so queued callbacks from a prior lifecycle are discarded.
+M._rerun_generation = 0
+M._rerun_tokens = {}
+
+function M.invalidate_reruns()
+	M._rerun_generation = M._rerun_generation + 1
+	M._rerun_tokens = {}
+end
+
 -- Check if a buffer should be processed by consolelog
 local function should_process_buffer(bufnr)
 	return utils.is_javascript_buffer(bufnr)
@@ -45,12 +55,6 @@ function M.setup()
 			end
 
 			local consolelog = require("consolelog")
-			local line_matching = require("consolelog.processing.line_matching")
-
-		-- Mark buffer as ready for processing (if using new method)
-		if line_matching.set_buffer_ready then
-			line_matching.set_buffer_ready(bufnr, true)
-		end
 
 			-- Clear outputs for this buffer on reload
 			if consolelog.outputs[bufnr] then
@@ -65,30 +69,47 @@ function M.setup()
 	-- Mark buffer as ready when it's written and clear outputs
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		group = group,
-		callback = function()
-			local bufnr = vim.api.nvim_get_current_buf()
-
-			if not should_process_buffer(bufnr) then
-				return
-			end
-
+		callback = function(args)
+			local bufnr = args.buf
 			local consolelog = require("consolelog")
-			local line_matching = require("consolelog.processing.line_matching")
+			local inspector = require("consolelog.communication.inspector")
+			local is_tracked = inspector.is_single_file_buffer(bufnr)
 
-			-- Clear outputs for this buffer on save
-			if consolelog.outputs[bufnr] then
-				local debug_logger = require("consolelog.core.debug_logger")
-				debug_logger.log("BUFWRITEPOST", string.format("Clearing outputs for buffer %d on save", bufnr))
-				consolelog.outputs[bufnr] = {}
-				require("consolelog.display.display").clear_buffer(bufnr)
+			-- Clear outputs on save for JS buffers and tracked single-file buffers.
+			-- The is_tracked guard lets .mts/.cts files without a recognised
+			-- filetype clear stale outputs before the deferred re-run.
+			if should_process_buffer(bufnr) or is_tracked then
+				if consolelog.outputs[bufnr] then
+					local debug_logger = require("consolelog.core.debug_logger")
+					debug_logger.log("BUFWRITEPOST", string.format("Clearing outputs for buffer %d on save", bufnr))
+					consolelog.outputs[bufnr] = {}
+					require("consolelog.display.display").clear_buffer(bufnr)
+				end
 			end
 
-			if line_matching.set_buffer_ready then
-				line_matching.set_buffer_ready(bufnr, true)
+			-- Auto re-run on save for single-file buffers previously run via :ConsoleLogRun
+			local gen = M._rerun_generation
+			if is_tracked
+				and consolelog.config.enabled
+				and consolelog.config.runner.rerun_on_save
+				and vim.api.nvim_buf_is_valid(bufnr)
+				and vim.api.nvim_buf_is_loaded(bufnr) then
+				local token = (M._rerun_tokens[bufnr] or 0) + 1
+				M._rerun_tokens[bufnr] = token
+				vim.defer_fn(function()
+					if M._rerun_generation == gen
+						and M._rerun_tokens[bufnr] == token
+						and consolelog.config.enabled
+						and consolelog.config.runner.rerun_on_save
+						and inspector.is_single_file_buffer(bufnr)
+						and vim.api.nvim_buf_is_valid(bufnr)
+						and vim.api.nvim_buf_is_loaded(bufnr) then
+						consolelog.run_buffer(bufnr)
+					end
+				end, 50)
 			end
 		end,
 	})
 end
 
 return M
-

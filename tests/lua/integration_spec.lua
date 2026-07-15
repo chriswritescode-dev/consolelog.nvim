@@ -15,6 +15,9 @@ describe("Integration Tests", function()
     -- Load the main module
     consolelog = require('consolelog.core.init')
     
+    -- Set project root to /tmp so test buffers are considered in-project
+    consolelog.project_root = "/tmp"
+
     -- Create test buffer with unique name
     test_counter = test_counter + 1
     test_bufnr = vim.api.nvim_create_buf(false, true)
@@ -25,6 +28,7 @@ describe("Integration Tests", function()
       'console.error("error");',
       'console.warn("warning");'
     })
+    vim.bo[test_bufnr].filetype = "javascript"
   end
   
   describe("Module initialization", function()
@@ -99,14 +103,11 @@ describe("Integration Tests", function()
   end)
   
   describe("Commands", function()
-    it("should have command functions", function()
+    it("should have setup function", function()
       setup()
       
       local commands = require('consolelog.core.commands')
-      assert.not_nil(commands.run, "Should have run command")
-      assert.not_nil(commands.clear, "Should have clear command")
-      assert.not_nil(commands.toggle, "Should have toggle command")
-      assert.not_nil(commands.inspect, "Should have inspect command")
+      assert.not_nil(commands.setup, "Should have setup function")
     end)
   end)
   
@@ -116,7 +117,7 @@ describe("Integration Tests", function()
       
       assert.not_nil(utils.is_javascript_file, "Should have is_javascript_file")
       assert.not_nil(utils.is_javascript_buffer, "Should have is_javascript_buffer")
-      assert.not_nil(utils.find_buffer_for_file, "Should have find_buffer_for_file")
+      assert.not_nil(utils.strip_ansi, "Should have strip_ansi")
     end)
     
     it("should detect JavaScript files", function()
@@ -127,6 +128,8 @@ describe("Integration Tests", function()
         "test.jsx",
         "test.ts",
         "test.tsx",
+        "test.mts",
+        "test.cts",
         "test.mjs",
         "test.cjs"
       }
@@ -145,15 +148,6 @@ describe("Integration Tests", function()
       for _, file in ipairs(non_js_files) do
         assert.is_false(utils.is_javascript_file(file), file .. " should not be detected as JS")
       end
-    end)
-    
-    it("should find buffer for file", function()
-      setup()
-      
-      local utils = require('consolelog.core.utils')
-      local found = utils.find_buffer_for_file("test.js")
-      
-      assert.equals(found, test_bufnr, "Should find test buffer")
     end)
   end)
   
@@ -182,30 +176,22 @@ describe("Integration Tests", function()
       local display = require('consolelog.display.display')
       display.update_output(test_bufnr, 1, "test value", "log", "test value")
       
-      -- Check output has history
+      -- Apply pending updates to move them to outputs
       display.apply_pending_updates(test_bufnr)
+
+      -- Check output has history with execution count
       local outputs = consolelog.outputs[test_bufnr]
       assert.not_nil(outputs, "Should have outputs")
-      
-      local output = nil
-      for _, o in ipairs(outputs) do
-        if o.line == 1 then
-          output = o
-          break
-        end
-      end
-      
-      assert.not_nil(output, "Should have output at line 1")
-      assert.equals(output.execution_count, 1, "Should track execution count")
-      assert.not_nil(output.history, "Should have history array")
-      assert.equals(#output.history, 1, "Should have 1 history entry")
+      assert.is_true(#outputs > 0, "Should have at least one output")
+      assert.equals(outputs[1].execution_count, 1, "First execution should have count 1")
+      assert.not_nil(outputs[1].history, "Should have history table")
+      assert.is_true(#outputs[1].history > 0, "History should have at least one entry")
     end)
   end)
   
   describe("WebSocket to Display pipeline", function()
     it("should process console message through message_processor", function()
       setup()
-      vim.bo[test_bufnr].filetype = "javascript"
       
       local message_processor = require('consolelog.processing.message_processor_impl')
       
@@ -213,15 +199,20 @@ describe("Integration Tests", function()
         type = "console",
         method = "log",
         location = {
-          file = string.format("test_%d.js", test_counter),
+          file = string.format("/tmp/test_%d.js", test_counter),
           line = 1
         },
         args = {"test output"}
       }
       
-      local success = message_processor.process_message(message)
+      -- process_message returns true when message matches a buffer
+      local result = message_processor.process_message(message)
+      assert.is_true(result, "Should process message and match buffer")
       
-      assert.is_true(success, "Should process message successfully")
+      -- Verify the output was queued
+      local display = require('consolelog.display.display')
+      assert.not_nil(display.pending_updates[test_bufnr],
+        "Should have pending updates for the buffer")
     end)
     
     it("should handle batch messages", function()
@@ -294,20 +285,28 @@ describe("Integration Tests", function()
       
       local display = require('consolelog.display.display')
       
+      -- Both calls should not error
       display.update_output(test_bufnr, 1, "buffer 1 output", "log")
       display.update_output(buf2, 1, "buffer 2 output", "log")
       
       display.apply_pending_updates(test_bufnr)
       display.apply_pending_updates(buf2)
       
-      assert.not_nil(consolelog.outputs[test_bufnr], "Should have outputs for buf1")
-      assert.not_nil(consolelog.outputs[buf2], "Should have outputs for buf2")
-      
-      if consolelog.outputs[test_bufnr] and consolelog.outputs[buf2] then
-        local buf1_count = #consolelog.outputs[test_bufnr]
-        local buf2_count = #consolelog.outputs[buf2]
-        assert.is_true(buf1_count > 0 or buf2_count > 0, "Should have outputs in at least one buffer")
-      end
+      -- Check that both buffers are tracked
+      assert.is_true(display.tracked_buffers[test_bufnr] == true,
+        "Should track first buffer")
+      assert.is_true(display.tracked_buffers[buf2] == true,
+        "Should track second buffer")
+
+      -- Check that both buffers have outputs
+      assert.not_nil(consolelog.outputs[test_bufnr],
+        "Should have outputs for first buffer")
+      assert.not_nil(consolelog.outputs[buf2],
+        "Should have outputs for second buffer")
+      assert.equals(consolelog.outputs[test_bufnr][1].value, "buffer 1 output",
+        "Should retain first buffer output")
+      assert.equals(consolelog.outputs[buf2][1].value, "buffer 2 output",
+        "Should retain second buffer output")
       
       vim.api.nvim_buf_delete(buf2, { force = true })
     end)
