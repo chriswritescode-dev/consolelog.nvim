@@ -45,6 +45,7 @@ M.DISPLAY = {
 M.FILE_PATTERNS = {
 	JAVASCRIPT_SINGLE = { "%.js$", "%.mjs$", "%.cjs$", "%.ts$", "%.mts$", "%.cts$" },
 	TYPESCRIPT = { "%.ts$", "%.mts$", "%.cts$" },
+	PYTHON = { "%.py$" },
 	FRAMEWORK_SUPPORTED = { "%.js$", "%.jsx$", "%.ts$", "%.tsx$" }
 }
 
@@ -97,6 +98,11 @@ function M.is_single_file_runnable(filepath)
 			return true
 		end
 	end
+	for _, pattern in ipairs(M.FILE_PATTERNS.PYTHON) do
+		if filepath:match(pattern) then
+			return true
+		end
+	end
 	return false
 end
 
@@ -111,6 +117,15 @@ end
 
 function M.is_typescript_file(filepath)
 	for _, pattern in ipairs(M.FILE_PATTERNS.TYPESCRIPT) do
+		if filepath:match(pattern) then
+			return true
+		end
+	end
+	return false
+end
+
+function M.is_python_file(filepath)
+	for _, pattern in ipairs(M.FILE_PATTERNS.PYTHON) do
 		if filepath:match(pattern) then
 			return true
 		end

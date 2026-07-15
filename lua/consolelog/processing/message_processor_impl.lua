@@ -4,7 +4,7 @@ local line_matching = require("consolelog.processing.line_matching")
 local display = require("consolelog.display.display")
 local debug_logger = require("consolelog.core.debug_logger")
 
-function M.format_args(args, method)
+function M.format_args(args, method, preserve_literals)
 	if not args or #args == 0 then
 		return "[console." .. (method or "log") .. "]", nil
 	end
@@ -12,7 +12,7 @@ function M.format_args(args, method)
 	debug_logger.log("NEW_PROCESSOR", string.format("Processing %d args: %s", #args, vim.inspect(args)))
 
 	-- Handle ANSI format strings from browser console
-	if #args >= 1 and type(args[1]) == "string" then
+	if not preserve_literals and #args >= 1 and type(args[1]) == "string" then
 		local first = args[1]
 		if first:match("%%s") then
 			first = first:gsub("\27%[[^m]*m", "")

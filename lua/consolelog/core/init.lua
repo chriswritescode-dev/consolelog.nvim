@@ -75,6 +75,7 @@ M.config = {
 		command = nil,
 		use_inspector = true,
 		rerun_on_save = true,
+		python_executable = nil,
 	},
 	keymaps = {
 		enabled = true,
@@ -220,6 +221,8 @@ function M.disable()
 	local inspector = require("consolelog.communication.inspector")
 	inspector.stop_all_sessions()
 
+	require("consolelog.communication.python_runner").stop_all_sessions()
+
 	-- Invalidate any deferred rerun callbacks queued before this disable
 	require("consolelog.core.autocmds").invalidate_reruns()
 
@@ -271,7 +274,7 @@ function M.run_buffer(bufnr)
 	local constants = require("consolelog.core.constants")
 
 	if not constants.is_single_file_runnable(filepath) then
-		M.notify("ConsoleLogRun supports .js/.mjs/.cjs/.ts/.mts/.cts files.", vim.log.levels.ERROR)
+		M.notify("ConsoleLogRun supports .js/.mjs/.cjs/.ts/.mts/.cts/.py files.", vim.log.levels.ERROR)
 		return
 	end
 
@@ -284,17 +287,28 @@ function M.run_buffer(bufnr)
 		M.enable()
 	end
 
-	local inspector = require("consolelog.communication.inspector")
-	
+	-- Dispatch to the appropriate runner based on file type
+	local runner
+	if constants.is_python_file(filepath) then
+		runner = require("consolelog.communication.python_runner")
+	else
+		runner = require("consolelog.communication.inspector")
+	end
+
 	-- Clear any stale outputs from previous runs (including completed sessions)
 	require("consolelog.display.display").clear_buffer(bufnr)
 
-	local existing_session = inspector.get_session_for_buffer(bufnr)
-	if existing_session then
-		inspector.cleanup_session(existing_session)
+	-- Clean any existing session from BOTH runners (handles buffer renamed between JS and Python)
+	local inspector = require("consolelog.communication.inspector")
+	local py_runner = require("consolelog.communication.python_runner")
+	for _, r in ipairs({ inspector, py_runner }) do
+		local existing = r.get_session_for_buffer(bufnr)
+		if existing then
+			r.cleanup_session(existing)
+		end
 	end
 
-	local session_id = inspector.start_debug_session(filepath, bufnr)
+	local session_id = runner.start_debug_session(filepath, bufnr)
 
 	if session_id then
 		M.notify("Running " .. vim.fn.fnamemodify(filepath, ":t") .. " with console capture", vim.log.levels.INFO)

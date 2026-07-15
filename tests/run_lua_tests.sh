@@ -21,7 +21,7 @@ run_test() {
     
     echo -e "${CYAN}Running: ${test_name}${NC}"
     
-    PATH="/tmp/nvim-linux64/bin:$PATH" nvim --headless -c "lua package.path = './lua/?.lua;./lua/?/init.lua;./tests/lua/?.lua;' .. package.path" -c "lua local ok, err = pcall(dofile, '$test_file'); if not ok then print('FAILED: ' .. err) end" -c "qa!" 2>&1 | tee /tmp/test_output.txt
+    PATH="/tmp/nvim-linux64/bin:$PATH" nvim --headless --clean -c "lua package.path = './lua/?.lua;./lua/?/init.lua;./tests/lua/?.lua;' .. package.path" -c "lua local ok, err = pcall(dofile, '$test_file'); if not ok then print('FAILED: ' .. err) end" -c "qa!" 2>&1 | tee /tmp/test_output.txt
     local nvim_exit=${PIPESTATUS[0]}
     
     # Check for FAILED: lines emitted by test assertions

@@ -167,6 +167,30 @@ describe("Single File Run", function()
     end)
   end)
 
+  describe("constants.is_single_file_runnable with Python", function()
+    it("should return true for .py files", function()
+      assert.is_true(constants.is_single_file_runnable("a.py"))
+    end)
+
+    it("should return false for .pyc files", function()
+      assert.is_false(constants.is_single_file_runnable("a.pyc"))
+    end)
+  end)
+
+  describe("constants.is_python_file", function()
+    it("should return true for .py files", function()
+      assert.is_true(constants.is_python_file("a.py"))
+    end)
+
+    it("should return false for .js files", function()
+      assert.is_false(constants.is_python_file("a.js"))
+    end)
+
+    it("should return false for .pyc files", function()
+      assert.is_false(constants.is_python_file("a.pyc"))
+    end)
+  end)
+
   describe("constants.is_typescript_file", function()
     it("should return true for .ts files", function()
       assert.is_true(constants.is_typescript_file("a.ts"))
@@ -605,6 +629,395 @@ describe("Single File Run", function()
     end)
   end)
 
+  describe("run_buffer Python dispatch", function()
+    local start_session_mock
+    local saved_inspector_module
+    local saved_python_runner_module
+    local py_start_session_mock
+
+    local function setup_inspector_stub()
+      saved_inspector_module = package.loaded["consolelog.communication.inspector"]
+      start_session_mock = helper.mock.new("start_debug_session")
+      start_session_mock:returns("fake_session_id")
+      package.loaded["consolelog.communication.inspector"] = {
+        start_debug_session = start_session_mock,
+        get_session_for_buffer = function() return nil end,
+        cleanup_session = function() end,
+        single_file_buffers = {},
+        is_single_file_buffer = function() return false end,
+        stop_all_sessions = function() end,
+      }
+    end
+
+    local function teardown_inspector_stub()
+      package.loaded["consolelog.communication.inspector"] = saved_inspector_module
+      saved_inspector_module = nil
+    end
+
+    local function setup_python_runner_stub()
+      saved_python_runner_module = package.loaded["consolelog.communication.python_runner"]
+      py_start_session_mock = helper.mock.new("start_debug_session")
+      py_start_session_mock:returns("py_session")
+      package.loaded["consolelog.communication.python_runner"] = {
+        start_debug_session = py_start_session_mock,
+        get_session_for_buffer = function() return nil end,
+        cleanup_session = function() end,
+        stop_all_sessions = function() end,
+      }
+    end
+
+    local function teardown_python_runner_stub()
+      package.loaded["consolelog.communication.python_runner"] = saved_python_runner_module
+      saved_python_runner_module = nil
+    end
+
+    local saved_display_module = nil
+
+    local function setup_consolelog_module()
+      saved_display_module = package.loaded["consolelog.display.display"]
+      package.loaded["consolelog.display.display"] = {
+        clear_all = function() end,
+        clear_buffer = function() end,
+        show_outputs = function() end,
+      }
+      package.loaded["consolelog"] = {
+        config = { enabled = true, runner = { rerun_on_save = true } },
+        enable = function() end,
+        notify = function() end,
+      }
+    end
+
+    local function teardown_consolelog_module()
+      package.loaded["consolelog.display.display"] = saved_display_module
+      saved_display_module = nil
+      package.loaded["consolelog"] = nil
+    end
+
+    local function cleanup_sessions()
+      inspector.sessions = {}
+      inspector.reconnect_attempts = {}
+      inspector.single_file_buffers = {}
+      inspector._intentionally_stopped_jobs = {}
+    end
+
+    it("should call python_runner.start_debug_session for .py file and not inspector", function()
+      setup_inspector_stub()
+      setup_python_runner_stub()
+      setup_consolelog_module()
+      cleanup_sessions()
+
+      local real_filereadable = vim.fn.filereadable
+      vim.fn.filereadable = function(path)
+        if path == "/tmp/consolelog_test.py" then return 1 end
+        return real_filereadable(path)
+      end
+
+      local real_buf_get_name = vim.api.nvim_buf_get_name
+      vim.api.nvim_buf_get_name = function()
+        return "/tmp/consolelog_test.py"
+      end
+
+      local core = require("consolelog.core.init")
+      core.run_buffer(6)
+
+      assert.equals(1, py_start_session_mock.call_count, "python_runner.start_debug_session should be called once")
+      assert.equals(0, start_session_mock.call_count, "inspector.start_debug_session should NOT be called")
+
+      vim.api.nvim_buf_get_name = real_buf_get_name
+      vim.fn.filereadable = real_filereadable
+      teardown_inspector_stub()
+      teardown_python_runner_stub()
+      teardown_consolelog_module()
+      cleanup_sessions()
+    end)
+  end)
+
+  describe("run_buffer cross-runner session cleanup", function()
+    local start_session_mock
+    local saved_inspector_module
+    local saved_python_runner_module
+    local py_start_session_mock
+    local inspector_cleanup_mock
+    local py_cleanup_mock
+
+    local function setup_inspector_stub()
+      saved_inspector_module = package.loaded["consolelog.communication.inspector"]
+      start_session_mock = helper.mock.new("start_debug_session")
+      start_session_mock:returns("fake_session_id")
+      inspector_cleanup_mock = helper.mock.new("cleanup_session")
+      package.loaded["consolelog.communication.inspector"] = {
+        start_debug_session = start_session_mock,
+        get_session_for_buffer = function() return nil end,
+        cleanup_session = inspector_cleanup_mock,
+        single_file_buffers = {},
+        is_single_file_buffer = function() return false end,
+        stop_all_sessions = function() end,
+      }
+    end
+
+    local function teardown_inspector_stub()
+      package.loaded["consolelog.communication.inspector"] = saved_inspector_module
+      saved_inspector_module = nil
+    end
+
+    local function setup_python_runner_stub()
+      saved_python_runner_module = package.loaded["consolelog.communication.python_runner"]
+      py_start_session_mock = helper.mock.new("start_debug_session")
+      py_start_session_mock:returns("py_session")
+      py_cleanup_mock = helper.mock.new("cleanup_session")
+      package.loaded["consolelog.communication.python_runner"] = {
+        start_debug_session = py_start_session_mock,
+        get_session_for_buffer = function() return nil end,
+        cleanup_session = py_cleanup_mock,
+        stop_all_sessions = function() end,
+      }
+    end
+
+    local function teardown_python_runner_stub()
+      package.loaded["consolelog.communication.python_runner"] = saved_python_runner_module
+      saved_python_runner_module = nil
+    end
+
+    local saved_display_module = nil
+
+    local function setup_consolelog_module()
+      saved_display_module = package.loaded["consolelog.display.display"]
+      package.loaded["consolelog.display.display"] = {
+        clear_all = function() end,
+        clear_buffer = function() end,
+        show_outputs = function() end,
+      }
+      package.loaded["consolelog"] = {
+        config = { enabled = true, runner = { rerun_on_save = true } },
+        enable = function() end,
+        notify = function() end,
+      }
+    end
+
+    local function teardown_consolelog_module()
+      package.loaded["consolelog.display.display"] = saved_display_module
+      saved_display_module = nil
+      package.loaded["consolelog"] = nil
+    end
+
+    local function cleanup_sessions()
+      inspector.sessions = {}
+      inspector.reconnect_attempts = {}
+      inspector.single_file_buffers = {}
+      inspector._intentionally_stopped_jobs = {}
+    end
+
+    it("should clean inspector session when running a renamed .py buffer", function()
+      setup_inspector_stub()
+      setup_python_runner_stub()
+      setup_consolelog_module()
+      cleanup_sessions()
+
+      -- Simulate an existing inspector session on buffer 6
+      local existing_session = { filepath = "/tmp/old.js", bufnr = 6 }
+      local inspector_get_session = function(bufnr)
+        if bufnr == 6 then return existing_session end
+        return nil
+      end
+      package.loaded["consolelog.communication.inspector"].get_session_for_buffer = inspector_get_session
+
+      local real_filereadable = vim.fn.filereadable
+      vim.fn.filereadable = function(path)
+        if path == "/tmp/consolelog_test.py" then return 1 end
+        return real_filereadable(path)
+      end
+
+      local real_buf_get_name = vim.api.nvim_buf_get_name
+      vim.api.nvim_buf_get_name = function()
+        return "/tmp/consolelog_test.py"
+      end
+
+      local core = require("consolelog.core.init")
+      core.run_buffer(6)
+
+      assert.equals(1, inspector_cleanup_mock.call_count,
+        "inspector session must be cleaned when buffer runs as .py")
+      assert.equals(1, py_start_session_mock.call_count,
+        "python_runner.start_debug_session should be called")
+      assert.equals(0, start_session_mock.call_count,
+        "inspector.start_debug_session should NOT be called")
+
+      vim.api.nvim_buf_get_name = real_buf_get_name
+      vim.fn.filereadable = real_filereadable
+      teardown_inspector_stub()
+      teardown_python_runner_stub()
+      teardown_consolelog_module()
+      cleanup_sessions()
+    end)
+
+    it("should clean python_runner session when running a renamed .js buffer", function()
+      setup_inspector_stub()
+      setup_python_runner_stub()
+      setup_consolelog_module()
+      cleanup_sessions()
+
+      -- Simulate an existing python_runner session on buffer 6
+      local existing_py_session = { filepath = "/tmp/old.py", bufnr = 6 }
+      local py_get_session = function(bufnr)
+        if bufnr == 6 then return existing_py_session end
+        return nil
+      end
+      package.loaded["consolelog.communication.python_runner"].get_session_for_buffer = py_get_session
+
+      local real_filereadable = vim.fn.filereadable
+      vim.fn.filereadable = function(path)
+        if path == "/tmp/consolelog_test.js" then return 1 end
+        return real_filereadable(path)
+      end
+
+      local real_buf_get_name = vim.api.nvim_buf_get_name
+      vim.api.nvim_buf_get_name = function()
+        return "/tmp/consolelog_test.js"
+      end
+
+      local core = require("consolelog.core.init")
+      core.run_buffer(6)
+
+      assert.equals(1, py_cleanup_mock.call_count,
+        "python_runner session must be cleaned when buffer runs as .js")
+      assert.equals(1, start_session_mock.call_count,
+        "inspector.start_debug_session should be called")
+      assert.equals(0, py_start_session_mock.call_count,
+        "python_runner.start_debug_session should NOT be called")
+
+      vim.api.nvim_buf_get_name = real_buf_get_name
+      vim.fn.filereadable = real_filereadable
+      teardown_inspector_stub()
+      teardown_python_runner_stub()
+      teardown_consolelog_module()
+      cleanup_sessions()
+    end)
+  end)
+
+  describe("rerun-on-save for Python", function()
+    local run_buffer_mock
+
+    local function setup_display_stub()
+      package.loaded["consolelog.display.display"] = {
+        clear_buffer = function() end,
+        update_output = function() end,
+        show_outputs = function() end,
+      }
+    end
+
+    local function teardown_display_stub()
+      package.loaded["consolelog.display.display"] = nil
+    end
+
+    local function cleanup_sessions()
+      inspector.sessions = {}
+      inspector.reconnect_attempts = {}
+      inspector.single_file_buffers = {}
+      inspector._intentionally_stopped_jobs = {}
+    end
+
+    it("should rerun tracked .py buffer even when filetype is unset", function()
+      setup_display_stub()
+      cleanup_sessions()
+
+      run_buffer_mock = helper.mock.new("run_buffer")
+
+      -- Track clear_buffer calls to verify output clearing
+      local clear_buffer_mock = helper.mock.new("clear_buffer")
+      package.loaded["consolelog.display.display"] = {
+        clear_buffer = clear_buffer_mock,
+        update_output = function() end,
+        show_outputs = function() end,
+      }
+
+      package.loaded["consolelog"] = {
+        config = { enabled = true, runner = { rerun_on_save = true } },
+        enable = function() end,
+        notify = function() end,
+        outputs = { [3] = { { text = "old output", line = 1 } } },
+        run_buffer = run_buffer_mock,
+      }
+
+      -- Simulate unset filetype: is_javascript_buffer and is_supported_buffer both return false
+      package.loaded["consolelog.core.utils"] = {
+        is_javascript_buffer = function() return false end,
+        is_supported_buffer = function() return false end,
+      }
+
+      package.loaded["consolelog.communication.inspector"] = inspector
+
+      inspector.single_file_buffers[3] = "/tmp/tracked.py"
+
+      local saved_buf_get_name = vim.api.nvim_buf_get_name
+      vim.api.nvim_buf_get_name = function() return "/tmp/tracked.py" end
+
+      local saved_buf_is_valid = vim.api.nvim_buf_is_valid
+      vim.api.nvim_buf_is_valid = function() return true end
+
+      local saved_buf_is_loaded = vim.api.nvim_buf_is_loaded
+      vim.api.nvim_buf_is_loaded = function() return true end
+
+      local saved_defer_fn = vim.defer_fn
+      local captured_deferred = nil
+      vim.defer_fn = function(fn, _delay)
+        captured_deferred = fn
+      end
+
+      local autocmds = require("consolelog.core.autocmds")
+
+      local captured_callbacks = {}
+      local saved_create_autocmd = vim.api.nvim_create_autocmd
+      vim.api.nvim_create_autocmd = function(event, opts)
+        table.insert(captured_callbacks, { event = event, callback = opts.callback })
+        return 1
+      end
+
+      local saved_create_augroup = vim.api.nvim_create_augroup
+      vim.api.nvim_create_augroup = function() return 1 end
+
+      autocmds.setup()
+
+      vim.api.nvim_create_autocmd = saved_create_autocmd
+      vim.api.nvim_create_augroup = saved_create_augroup
+
+      local bufwritepost_cb = nil
+      for _, entry in ipairs(captured_callbacks) do
+        if entry.event == "BufWritePost" then
+          bufwritepost_cb = entry.callback
+          break
+        end
+      end
+
+      assert.not_nil(bufwritepost_cb, "BufWritePost autocmd should have been registered")
+
+      bufwritepost_cb({buf = 3})
+
+      -- Verify stale outputs are cleared before the deferred re-run
+      assert.equals(1, clear_buffer_mock.call_count,
+        "clear_buffer must be called for tracked Python buffer even when should_process_buffer is false")
+      assert.is_true(vim.tbl_isempty(package.loaded["consolelog"].outputs[3]),
+        "outputs for buffer 3 must be cleared on save")
+
+      assert.not_nil(captured_deferred, "vim.defer_fn should have been called")
+
+      captured_deferred()
+
+      assert.equals(1, run_buffer_mock.call_count,
+        "tracked .py buffer must rerun even when should_process_buffer is false")
+
+      vim.defer_fn = saved_defer_fn
+      vim.api.nvim_buf_is_loaded = saved_buf_is_loaded
+      vim.api.nvim_buf_is_valid = saved_buf_is_valid
+      vim.api.nvim_buf_get_name = saved_buf_get_name
+      teardown_display_stub()
+      package.loaded["consolelog"] = nil
+      package.loaded["consolelog.core.utils"] = nil
+      package.loaded["consolelog.core.autocmds"] = nil
+      package.loaded["consolelog.communication.inspector"] = nil
+      cleanup_sessions()
+    end)
+  end)
+
   describe("single_file_buffers tracking", function()
     local function setup_display_stub()
       package.loaded["consolelog.display.display"] = {
@@ -780,6 +1193,7 @@ describe("Single File Run", function()
 
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
+        is_supported_buffer = function() return true end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -866,6 +1280,7 @@ describe("Single File Run", function()
 
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
+        is_supported_buffer = function() return true end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -932,6 +1347,7 @@ describe("Single File Run", function()
 
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
+        is_supported_buffer = function() return true end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -941,17 +1357,17 @@ describe("Single File Run", function()
       local saved_buf_get_name = vim.api.nvim_buf_get_name
       vim.api.nvim_buf_get_name = function() return "/tmp/tracked.js" end
 
-      local saved_defer_fn = vim.defer_fn
-      local captured_deferred = nil
-      vim.defer_fn = function(fn, _delay)
-        captured_deferred = fn
-      end
-
       local saved_buf_is_valid = vim.api.nvim_buf_is_valid
       vim.api.nvim_buf_is_valid = function() return true end
 
       local saved_buf_is_loaded = vim.api.nvim_buf_is_loaded
       vim.api.nvim_buf_is_loaded = function() return true end
+
+      local saved_defer_fn = vim.defer_fn
+      local captured_deferred = nil
+      vim.defer_fn = function(fn, _delay)
+        captured_deferred = fn
+      end
 
       local autocmds = require("consolelog.core.autocmds")
 
@@ -1019,6 +1435,7 @@ describe("Single File Run", function()
 
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
+        is_supported_buffer = function() return true end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1114,6 +1531,7 @@ describe("Single File Run", function()
 
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
+        is_supported_buffer = function() return true end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1174,6 +1592,7 @@ describe("Single File Run", function()
 
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
+        is_supported_buffer = function() return true end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1267,6 +1686,7 @@ describe("Single File Run", function()
       -- Simulate unset filetype: is_javascript_buffer returns false
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return false end,
+        is_supported_buffer = function() return false end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1358,6 +1778,7 @@ describe("Single File Run", function()
 
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
+        is_supported_buffer = function() return true end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector

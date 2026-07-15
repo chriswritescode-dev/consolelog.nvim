@@ -12,7 +12,7 @@ A Neovim plugin that captures and displays console outputs as virtual text inlin
 
 - Real-time Console Capture - See console outputs instantly as virtual text next to your code
 - Browser Support - Automatic console capture for Next.js, React, Vue, and Vite projects
-- Single-File Runner - Run standalone `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, and `.cts` files with console capture via Node.js Inspector
+- Single-File Runner - Run standalone `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, and `.py` files with console capture via Node.js Inspector (JS/TS) or a zero-dependency Python bootstrap (Python 3.8+)
 - Smart Object Display - Inline previews for small objects, floating inspector for large ones
 - Zero Config - Works out of the box with intelligent project detection
 - Accurate Line Mapping - Outputs appear exactly where they're logged using source maps
@@ -52,17 +52,28 @@ ConsoleLog automatically detects your project type and enables console capture:
 ### Project-Specific Behavior
 
 **Single-File Execution** (`:ConsoleLogRun` or `<leader>lr`):
-- Supports: `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts` files
-- TypeScript requires Node >= 22.6 (native from 23.6; `--experimental-strip-types` added automatically for 22.6–23.5). Node type stripping supports only erasable TypeScript syntax and does not apply `tsconfig` transforms.
-- Runs via Node.js Inspector with console capture
+- **JavaScript/TypeScript**: `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts` files
+  - TypeScript requires Node >= 22.6 (native from 23.6; `--experimental-strip-types` added automatically for 22.6–23.5). Node type stripping supports only erasable TypeScript syntax and does not apply `tsconfig` transforms.
+  - Runs via Node.js Inspector with console capture
+- **Python**: `.py` files — zero-dependency stdlib bootstrap, Python 3.8+
+  - Captures `print()`, `logging` records, raw `sys.stderr` writes, and uncaught exceptions
+  - Interpreter resolution: `runner.python_executable` config → `$VIRTUAL_ENV` → `.venv`/`venv` walking up from file → `python3`
 - Auto re-runs on save for buffers previously run with `:ConsoleLogRun` (configurable via `runner.rerun_on_save`)
-- Perfect for quick scripts and standalone JavaScript/TypeScript files
+- Perfect for quick scripts and standalone JavaScript/TypeScript/Python files
 
 **Browser Framework Projects** (automatic):
 - Supports: `.js`, `.jsx`, `.ts`, `.tsx`
 - Works with: Next.js, React, Vue, Vite, and any framework with source maps
 - Automatically injects WebSocket console capture
 - Just run `npm run dev` and start coding
+
+**Python** (single-file execution):
+- `print()` calls are captured with source location (file + line number)
+- `logging` records at WARNING+ are captured by default; lower levels are captured if the script configures its own logging level or calls `logging.basicConfig(level=...)`
+- Raw `sys.stderr` writes are buffered per-line and emitted as error events
+- Uncaught exceptions (including `SyntaxError` and non-zero `SystemExit`) report the deepest relevant traceback frame
+- Interpreter resolution order: `runner.python_executable` config key → `$VIRTUAL_ENV/bin/python` → `.venv/bin/python` or `venv/bin/python` walking up from the script's directory → system `python3`
+- Zero external dependencies — the bootstrap is a single stdlib-only Python 3.8+ script (`py/consolelog_runner.py`)
 
 ## Commands & Keybindings
 
@@ -135,6 +146,7 @@ The plugin works out of the box with sensible defaults. Here's the full configur
       },
       runner = {
         rerun_on_save = true,    -- Re-run single-file buffers on save after :ConsoleLogRun
+        python_executable = nil, -- Override Python interpreter (nil = auto-detect)
       },
       keymaps = {
         enabled = true,          -- Enable default keymaps
@@ -175,7 +187,7 @@ The plugin works out of the box with sensible defaults. Here's the full configur
     "ConsoleLogDebug",
     "ConsoleLogDebugClear",
   },
-  ft = { "javascript", "typescript", "javascriptreact", "typescriptreact" },
+  ft = { "javascript", "typescript", "javascriptreact", "typescriptreact", "python" },
 }
 ```
 

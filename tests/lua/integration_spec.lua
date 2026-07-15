@@ -15,8 +15,10 @@ describe("Integration Tests", function()
     -- Load the main module
     consolelog = require('consolelog.core.init')
     
-    -- Set project root to /tmp so test buffers are considered in-project
-    consolelog.project_root = "/tmp"
+    -- Set project root to /tmp so test buffers are considered in-project.
+    -- Resolve symlinks (e.g. /tmp -> /private/tmp on macOS) so the root
+    -- matches the buffer name that nvim_buf_set_name normalises.
+    consolelog.project_root = vim.fn.resolve("/tmp")
 
     -- Create test buffer with unique name
     test_counter = test_counter + 1
@@ -199,7 +201,7 @@ describe("Integration Tests", function()
         type = "console",
         method = "log",
         location = {
-          file = string.format("/tmp/test_%d.js", test_counter),
+          file = string.format("test_%d.js", test_counter),
           line = 1
         },
         args = {"test output"}

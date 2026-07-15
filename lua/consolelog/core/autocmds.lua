@@ -14,7 +14,7 @@ end
 
 -- Check if a buffer should be processed by consolelog
 local function should_process_buffer(bufnr)
-	return utils.is_javascript_buffer(bufnr)
+	return utils.is_supported_buffer(bufnr)
 end
 
 -- Export the function for use by other modules

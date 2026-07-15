@@ -251,6 +251,64 @@ describe("Display Module", function()
 
       assert.is_true(display.is_tracked_buffer(test_bufnr), "Should be tracked after update")
     end)
+
+    it("should accept output for python buffers via update_output", function()
+      setup()
+      vim.bo[test_bufnr].filetype = "python"
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      display.update_output(test_bufnr, 1, "hello from python", "log")
+
+      assert.is_true(display.is_tracked_buffer(test_bufnr), "Python buffer should be tracked")
+    end)
+
+    it("should allow tracked single-file buffers outside project root", function()
+      setup()
+      -- Set a project root that does NOT contain the buffer path
+      consolelog_mock.project_root = "/home/user/my-js-project"
+      vim.api.nvim_buf_set_name(test_bufnr, "/tmp/standalone.py")
+      vim.bo[test_bufnr].filetype = "python"
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      -- Register the buffer as an explicitly run single-file session
+      local inspector_mock = {
+        single_file_buffers = { [test_bufnr] = "/tmp/standalone.py" },
+      }
+      package.loaded["consolelog.communication.inspector"] = inspector_mock
+
+      display.update_output(test_bufnr, 1, "output from standalone", "log")
+
+      assert.is_true(display.is_tracked_buffer(test_bufnr),
+        "Tracked single-file buffer should receive output despite being outside project root")
+
+      -- Cleanup
+      package.loaded["consolelog.communication.inspector"] = nil
+      consolelog_mock.project_root = nil
+    end)
+
+    it("should discard non-tracked buffers outside project root", function()
+      setup()
+      consolelog_mock.project_root = "/home/user/my-js-project"
+      local bufnr2 = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_name(bufnr2, "/tmp/untracked.py")
+      vim.bo[bufnr2].filetype = "python"
+      consolelog_mock.outputs[bufnr2] = {}
+
+      -- NOT registered in single_file_buffers — should be discarded
+      local inspector_mock = {
+        single_file_buffers = {},
+      }
+      package.loaded["consolelog.communication.inspector"] = inspector_mock
+
+      display.update_output(bufnr2, 1, "should be discarded", "log")
+
+      assert.is_false(display.is_tracked_buffer(bufnr2),
+        "Non-tracked buffer outside project root should not receive output")
+
+      -- Cleanup
+      package.loaded["consolelog.communication.inspector"] = nil
+      consolelog_mock.project_root = nil
+    end)
   end)
 
   describe("History management", function()
@@ -433,7 +491,27 @@ describe("Display Module", function()
       assert.equals(#extmarks, 0, "Should not create extmarks for empty outputs")
     end)
 
-    it("should handle non-javascript buffers", function()
+    it("should handle non-supported buffers", function()
+      setup()
+      vim.bo[test_bufnr].filetype = "markdown"
+
+      consolelog_mock.outputs[test_bufnr] = {
+        { line = 1, value = "test", console_type = "log", type = "string" }
+      }
+
+      display.show_outputs(test_bufnr)
+
+      local extmarks = vim.api.nvim_buf_get_extmarks(
+        test_bufnr,
+        consolelog_mock.namespace,
+        0,
+        -1,
+        {}
+      )
+      assert.equals(#extmarks, 0, "Should not show outputs for unsupported buffer")
+    end)
+
+    it("should show outputs for python buffers", function()
       setup()
       vim.bo[test_bufnr].filetype = "python"
 
@@ -450,7 +528,7 @@ describe("Display Module", function()
         -1,
         {}
       )
-      assert.equals(#extmarks, 0, "Should not show outputs for non-JS buffer")
+      assert.equals(#extmarks, 1, "Should show outputs for python buffer")
     end)
 
     it("should prevent recursive calls with flag", function()
