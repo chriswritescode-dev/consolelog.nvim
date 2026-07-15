@@ -15,6 +15,7 @@ describe("Display Module", function()
 
   local function setup()
     test_bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(test_bufnr, "buftype", "")
     vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, {
       'console.log("test1");',
       'console.log("test2");',

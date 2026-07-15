@@ -13,8 +13,9 @@ function M.invalidate_reruns()
 end
 
 -- Check if a buffer should be processed by consolelog
-local function should_process_buffer(bufnr)
+local function should_process_buffer(bufnr, winid)
 	return utils.is_supported_buffer(bufnr)
+		and utils.find_regular_buffer_window(bufnr, winid) ~= nil
 end
 
 -- Export the function for use by other modules
@@ -27,13 +28,17 @@ function M.setup()
 		group = group,
 		callback = function()
 			local bufnr = vim.api.nvim_get_current_buf()
+			local winid = vim.api.nvim_get_current_win()
 
-			if not should_process_buffer(bufnr) then
+			if not should_process_buffer(bufnr, winid) then
 				return
 			end
 
 			local consolelog = require("consolelog")
 			consolelog.active_buf = bufnr
+			if consolelog.config.auto_enable and not consolelog.config.enabled then
+				consolelog.enable()
+			end
 
 			-- Show outputs for the newly active buffer if they exist
 			if consolelog.config.enabled and consolelog.outputs[bufnr] and not vim.tbl_isempty(consolelog.outputs[bufnr]) then
@@ -49,8 +54,9 @@ function M.setup()
 		group = group,
 		callback = function()
 			local bufnr = vim.api.nvim_get_current_buf()
+			local winid = vim.api.nvim_get_current_win()
 
-			if not should_process_buffer(bufnr) then
+			if not should_process_buffer(bufnr, winid) then
 				return
 			end
 
@@ -71,14 +77,16 @@ function M.setup()
 		group = group,
 		callback = function(args)
 			local bufnr = args.buf
+			local winid = vim.api.nvim_get_current_win()
 			local consolelog = require("consolelog")
 			local inspector = require("consolelog.communication.inspector")
 			local is_tracked = inspector.is_single_file_buffer(bufnr)
+			local is_regular_window = utils.find_regular_buffer_window(bufnr, winid) ~= nil
 
 			-- Clear outputs on save for JS buffers and tracked single-file buffers.
 			-- The is_tracked guard lets .mts/.cts files without a recognised
 			-- filetype clear stale outputs before the deferred re-run.
-			if should_process_buffer(bufnr) or is_tracked then
+			if is_regular_window and (should_process_buffer(bufnr, winid) or is_tracked) then
 				if consolelog.outputs[bufnr] then
 					local debug_logger = require("consolelog.core.debug_logger")
 					debug_logger.log("BUFWRITEPOST", string.format("Clearing outputs for buffer %d on save", bufnr))
@@ -89,7 +97,8 @@ function M.setup()
 
 			-- Auto re-run on save for single-file buffers previously run via :ConsoleLogRun
 			local gen = M._rerun_generation
-			if is_tracked
+			if is_regular_window
+				and is_tracked
 				and consolelog.config.enabled
 				and consolelog.config.runner.rerun_on_save
 				and vim.api.nvim_buf_is_valid(bufnr)
@@ -104,7 +113,7 @@ function M.setup()
 						and inspector.is_single_file_buffer(bufnr)
 						and vim.api.nvim_buf_is_valid(bufnr)
 						and vim.api.nvim_buf_is_loaded(bufnr) then
-						consolelog.run_buffer(bufnr)
+						consolelog.run_buffer(bufnr, winid)
 					end
 				end, 50)
 			end

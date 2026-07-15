@@ -587,10 +587,15 @@ describe("Single File Run", function()
       setup_consolelog_module()
       cleanup_sessions()
 
+      local test_bufnr = vim.api.nvim_create_buf(true, true)
+      vim.api.nvim_buf_set_option(test_bufnr, "buftype", "")
+      local winid = vim.api.nvim_get_current_win()
+      local previous_bufnr = vim.api.nvim_win_get_buf(winid)
+      vim.api.nvim_win_set_buf(winid, test_bufnr)
       local core = require("consolelog.core.init")
 
       vim.api.nvim_buf_get_name = function() return "/tmp/consolelog_test.txt" end
-      core.run_buffer(99)
+      core.run_buffer(test_bufnr, winid)
 
       assert.equals(0, start_session_mock.call_count)
 
@@ -598,12 +603,20 @@ describe("Single File Run", function()
       teardown_inspector_stub()
       teardown_consolelog_module()
       cleanup_sessions()
+      vim.api.nvim_win_set_buf(winid, previous_bufnr)
+      vim.api.nvim_buf_delete(test_bufnr, { force = true })
     end)
 
     it("should call start_debug_session for runnable .js file", function()
       setup_inspector_stub()
       setup_consolelog_module()
       cleanup_sessions()
+
+      local test_bufnr = vim.api.nvim_create_buf(true, true)
+      vim.api.nvim_buf_set_option(test_bufnr, "buftype", "")
+      local winid = vim.api.nvim_get_current_win()
+      local previous_bufnr = vim.api.nvim_win_get_buf(winid)
+      vim.api.nvim_win_set_buf(winid, test_bufnr)
 
       local real_filereadable = vim.fn.filereadable
       vim.fn.filereadable = function(path)
@@ -617,7 +630,7 @@ describe("Single File Run", function()
       end
 
       local core = require("consolelog.core.init")
-      core.run_buffer(5)
+      core.run_buffer(test_bufnr, winid)
 
       assert.equals(1, start_session_mock.call_count)
 
@@ -626,6 +639,47 @@ describe("Single File Run", function()
       teardown_inspector_stub()
       teardown_consolelog_module()
       cleanup_sessions()
+      vim.api.nvim_win_set_buf(winid, previous_bufnr)
+      vim.api.nvim_buf_delete(test_bufnr, { force = true })
+    end)
+
+    it("should not run a regular buffer from a diff window", function()
+      setup_inspector_stub()
+      setup_consolelog_module()
+      cleanup_sessions()
+
+      local winid = vim.api.nvim_get_current_win()
+      local previous_bufnr = vim.api.nvim_win_get_buf(winid)
+      local test_bufnr = vim.api.nvim_create_buf(true, true)
+      vim.api.nvim_buf_set_option(test_bufnr, "buftype", "")
+      vim.api.nvim_win_set_buf(winid, test_bufnr)
+      vim.api.nvim_win_set_option(winid, "diff", true)
+
+      local real_filereadable = vim.fn.filereadable
+      vim.fn.filereadable = function(path)
+        if path == "/tmp/consolelog_diff_test.js" then return 1 end
+        return real_filereadable(path)
+      end
+
+      local real_buf_get_name = vim.api.nvim_buf_get_name
+      vim.api.nvim_buf_get_name = function()
+        return "/tmp/consolelog_diff_test.js"
+      end
+
+      local core = require("consolelog.core.init")
+      core.run_buffer(test_bufnr, winid)
+      local call_count = start_session_mock.call_count
+
+      vim.api.nvim_buf_get_name = real_buf_get_name
+      vim.fn.filereadable = real_filereadable
+      vim.api.nvim_win_set_option(winid, "diff", false)
+      vim.api.nvim_win_set_buf(winid, previous_bufnr)
+      vim.api.nvim_buf_delete(test_bufnr, { force = true })
+      teardown_inspector_stub()
+      teardown_consolelog_module()
+      cleanup_sessions()
+
+      assert.equals(call_count, 0, "Diff windows must not start debug sessions")
     end)
   end)
 
@@ -706,6 +760,12 @@ describe("Single File Run", function()
       setup_consolelog_module()
       cleanup_sessions()
 
+      local test_bufnr = vim.api.nvim_create_buf(true, true)
+      vim.api.nvim_buf_set_option(test_bufnr, "buftype", "")
+      local winid = vim.api.nvim_get_current_win()
+      local previous_bufnr = vim.api.nvim_win_get_buf(winid)
+      vim.api.nvim_win_set_buf(winid, test_bufnr)
+
       local real_filereadable = vim.fn.filereadable
       vim.fn.filereadable = function(path)
         if path == "/tmp/consolelog_test.py" then return 1 end
@@ -718,7 +778,7 @@ describe("Single File Run", function()
       end
 
       local core = require("consolelog.core.init")
-      core.run_buffer(6)
+      core.run_buffer(test_bufnr, winid)
 
       assert.equals(1, py_start_session_mock.call_count, "python_runner.start_debug_session should be called once")
       assert.equals(0, start_session_mock.call_count, "inspector.start_debug_session should NOT be called")
@@ -729,6 +789,8 @@ describe("Single File Run", function()
       teardown_python_runner_stub()
       teardown_consolelog_module()
       cleanup_sessions()
+      vim.api.nvim_win_set_buf(winid, previous_bufnr)
+      vim.api.nvim_buf_delete(test_bufnr, { force = true })
     end)
   end)
 
@@ -813,10 +875,16 @@ describe("Single File Run", function()
       setup_consolelog_module()
       cleanup_sessions()
 
-      -- Simulate an existing inspector session on buffer 6
-      local existing_session = { filepath = "/tmp/old.js", bufnr = 6 }
+      local test_bufnr = vim.api.nvim_create_buf(true, true)
+      vim.api.nvim_buf_set_option(test_bufnr, "buftype", "")
+      local winid = vim.api.nvim_get_current_win()
+      local previous_bufnr = vim.api.nvim_win_get_buf(winid)
+      vim.api.nvim_win_set_buf(winid, test_bufnr)
+
+      -- Simulate an existing inspector session on test buffer
+      local existing_session = { filepath = "/tmp/old.js", bufnr = test_bufnr }
       local inspector_get_session = function(bufnr)
-        if bufnr == 6 then return existing_session end
+        if bufnr == test_bufnr then return existing_session end
         return nil
       end
       package.loaded["consolelog.communication.inspector"].get_session_for_buffer = inspector_get_session
@@ -833,7 +901,7 @@ describe("Single File Run", function()
       end
 
       local core = require("consolelog.core.init")
-      core.run_buffer(6)
+      core.run_buffer(test_bufnr, winid)
 
       assert.equals(1, inspector_cleanup_mock.call_count,
         "inspector session must be cleaned when buffer runs as .py")
@@ -848,6 +916,8 @@ describe("Single File Run", function()
       teardown_python_runner_stub()
       teardown_consolelog_module()
       cleanup_sessions()
+      vim.api.nvim_win_set_buf(winid, previous_bufnr)
+      vim.api.nvim_buf_delete(test_bufnr, { force = true })
     end)
 
     it("should clean python_runner session when running a renamed .js buffer", function()
@@ -856,10 +926,16 @@ describe("Single File Run", function()
       setup_consolelog_module()
       cleanup_sessions()
 
-      -- Simulate an existing python_runner session on buffer 6
-      local existing_py_session = { filepath = "/tmp/old.py", bufnr = 6 }
+      local test_bufnr = vim.api.nvim_create_buf(true, true)
+      vim.api.nvim_buf_set_option(test_bufnr, "buftype", "")
+      local winid = vim.api.nvim_get_current_win()
+      local previous_bufnr = vim.api.nvim_win_get_buf(winid)
+      vim.api.nvim_win_set_buf(winid, test_bufnr)
+
+      -- Simulate an existing python_runner session on test buffer
+      local existing_py_session = { filepath = "/tmp/old.py", bufnr = test_bufnr }
       local py_get_session = function(bufnr)
-        if bufnr == 6 then return existing_py_session end
+        if bufnr == test_bufnr then return existing_py_session end
         return nil
       end
       package.loaded["consolelog.communication.python_runner"].get_session_for_buffer = py_get_session
@@ -876,7 +952,7 @@ describe("Single File Run", function()
       end
 
       local core = require("consolelog.core.init")
-      core.run_buffer(6)
+      core.run_buffer(test_bufnr, winid)
 
       assert.equals(1, py_cleanup_mock.call_count,
         "python_runner session must be cleaned when buffer runs as .js")
@@ -891,6 +967,8 @@ describe("Single File Run", function()
       teardown_python_runner_stub()
       teardown_consolelog_module()
       cleanup_sessions()
+      vim.api.nvim_win_set_buf(winid, previous_bufnr)
+      vim.api.nvim_buf_delete(test_bufnr, { force = true })
     end)
   end)
 
@@ -942,6 +1020,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return false end,
         is_supported_buffer = function() return false end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1194,6 +1273,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
         is_supported_buffer = function() return true end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1281,6 +1361,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
         is_supported_buffer = function() return true end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1348,6 +1429,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
         is_supported_buffer = function() return true end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1436,6 +1518,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
         is_supported_buffer = function() return true end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1532,6 +1615,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
         is_supported_buffer = function() return true end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1593,6 +1677,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
         is_supported_buffer = function() return true end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1687,6 +1772,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return false end,
         is_supported_buffer = function() return false end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector
@@ -1779,6 +1865,7 @@ describe("Single File Run", function()
       package.loaded["consolelog.core.utils"] = {
         is_javascript_buffer = function() return true end,
         is_supported_buffer = function() return true end,
+        find_regular_buffer_window = function(_, winid) return winid end,
       }
 
       package.loaded["consolelog.communication.inspector"] = inspector

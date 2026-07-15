@@ -23,6 +23,7 @@ describe("Integration Tests", function()
     -- Create test buffer with unique name
     test_counter = test_counter + 1
     test_bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(test_bufnr, "buftype", "")
     vim.api.nvim_buf_set_name(test_bufnr, string.format("/tmp/test_%d.js", test_counter))
     vim.api.nvim_buf_set_lines(test_bufnr, 0, -1, false, {
       'console.log("test1");',
@@ -57,6 +58,23 @@ describe("Integration Tests", function()
   end)
   
   describe("Enable/Disable functionality", function()
+    it("should not enable from a diff window", function()
+      setup()
+
+      local winid = vim.api.nvim_get_current_win()
+      local previous_bufnr = vim.api.nvim_win_get_buf(winid)
+      vim.api.nvim_win_set_buf(winid, test_bufnr)
+      vim.api.nvim_win_set_option(winid, "diff", true)
+      consolelog.config.enabled = false
+
+      consolelog.enable()
+      local enabled = consolelog.config.enabled
+
+      vim.api.nvim_win_set_option(winid, "diff", false)
+      vim.api.nvim_win_set_buf(winid, previous_bufnr)
+      assert.is_false(enabled, "Diff windows must not enable ConsoleLog")
+    end)
+
     it("should enable and disable", function()
       setup()
       
@@ -279,6 +297,7 @@ describe("Integration Tests", function()
       setup()
       
       local buf2 = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_option(buf2, "buftype", "")
       vim.api.nvim_buf_set_name(buf2, "/tmp/test2.js")
       vim.api.nvim_buf_set_lines(buf2, 0, -1, false, {
         'console.log("buf2");'
