@@ -11,7 +11,7 @@ echo -e "${BLUE}================================${NC}"
 echo -e "${BLUE}ConsoleLog Lua Test Suite${NC}"
 echo -e "${BLUE}================================${NC}\n"
 
-TEST_DIR="lua"
+TEST_DIR="tests/lua"
 FAILED_TESTS=()
 PASSED_TESTS=()
 

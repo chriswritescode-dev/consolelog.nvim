@@ -31,6 +31,15 @@ function M.start_debug_session(filepath, bufnr)
 	local session_id = tostring(session.job_id)
 	M.sessions[session_id] = session
 	M.reconnect_attempts[session_id] = 0
+
+	-- Timeout to clean up if inspector URL is never found
+	vim.defer_fn(function()
+		if M.sessions[session_id] and not session.inspector_url then
+			vim.notify("ConsoleLog: Inspector URL not found (timeout)", vim.log.levels.ERROR)
+			M.cleanup_session(session)
+		end
+	end, 10000)
+
 	return session_id
 end
 

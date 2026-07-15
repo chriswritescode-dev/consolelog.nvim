@@ -328,9 +328,9 @@ function M.release_ports(project_root)
 	M.allocated_ports[instance_key] = nil
 
 	-- Remove port file
-	if M.port_files[instance_key] then
-		vim.fn.delete(M.port_files[instance_key])
-		M.port_files[instance_key] = nil
+	if M.port_files[project_root] then
+		vim.fn.delete(M.port_files[project_root])
+		M.port_files[project_root] = nil
 	end
 end
 

@@ -200,8 +200,8 @@ describe("Monorepo Framework Detection Tests", function()
 
 			-- Should return unknown (no frameworks found)
 			local framework = framework_detector.detect_framework(monorepo_root)
-			assert.equals(framework_detector.FRAMEWORKS.NODE, framework,
-				"Should return NODE for non-framework monorepo")
+			assert.equals(framework_detector.FRAMEWORKS.UNKNOWN, framework,
+				"Should return UNKNOWN for non-framework monorepo")
 
 			cleanup()
 		end)

@@ -175,10 +175,6 @@ function M.enable()
 			local ports = auto_inject.setup_project(project_root, true)
 
 			if ports then
-				-- Start WebSocket server
-				local ws_server = require("consolelog.communication.ws_server")
-				ws_server.start()
-
 				M.notify(string.format("ConsoleLog enabled for %s (Port %d)",
 						config.name or framework, ports.ws_port or 9999), vim.log.levels.INFO)
 			else

@@ -15,8 +15,7 @@ local injectors = {
 function M.detect_framework(project_root)
   local framework = framework_detector.detect_framework(project_root)
   
-  if framework == framework_detector.FRAMEWORKS.UNKNOWN or 
-     framework == framework_detector.FRAMEWORKS.NODE then
+  if framework == framework_detector.FRAMEWORKS.UNKNOWN then
     return nil, nil
   end
   
