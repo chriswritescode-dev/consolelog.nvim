@@ -45,6 +45,7 @@ M.DISPLAY = {
 M.FILE_PATTERNS = {
 	JAVASCRIPT_SINGLE = { "%.js$", "%.mjs$", "%.cjs$", "%.ts$", "%.mts$", "%.cts$" },
 	TYPESCRIPT = { "%.ts$", "%.mts$", "%.cts$" },
+	PYTHON = { "%.py$" },
 	FRAMEWORK_SUPPORTED = { "%.js$", "%.jsx$", "%.ts$", "%.tsx$" }
 }
 
@@ -76,6 +77,12 @@ M.FILES = {
 	BACKUP_SUFFIX = ".bk"
 }
 
+M.INJECTION = {
+	START_MARKER = "// ConsoleLog.nvim auto-injection start",
+	END_MARKER = "// ConsoleLog.nvim auto-injection end",
+	BLOCK_PATTERN = "// ConsoleLog%.nvim auto%-injection start.-// ConsoleLog%.nvim auto%-injection end\n?"
+}
+
 M.LOG_LEVELS = {
 	DEBUG = "DEBUG",
 	INFO = "INFO",
@@ -93,6 +100,11 @@ M.CONSOLE_TYPES = {
 
 function M.is_single_file_runnable(filepath)
 	for _, pattern in ipairs(M.FILE_PATTERNS.JAVASCRIPT_SINGLE) do
+		if filepath:match(pattern) then
+			return true
+		end
+	end
+	for _, pattern in ipairs(M.FILE_PATTERNS.PYTHON) do
 		if filepath:match(pattern) then
 			return true
 		end
@@ -118,5 +130,13 @@ function M.is_typescript_file(filepath)
 	return false
 end
 
-return M
+function M.is_python_file(filepath)
+	for _, pattern in ipairs(M.FILE_PATTERNS.PYTHON) do
+		if filepath:match(pattern) then
+			return true
+		end
+	end
+	return false
+end
 
+return M

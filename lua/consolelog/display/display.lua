@@ -16,7 +16,7 @@ function M.show_outputs(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
 	local utils = require("consolelog.core.utils")
-	if not utils.is_javascript_buffer(bufnr) then
+	if not utils.is_supported_buffer(bufnr) then
 		return
 	end
 
@@ -198,20 +198,26 @@ end
 
 function M.update_output(bufnr, line, value, console_type, raw_value)
 	local utils = require("consolelog.core.utils")
-	if not utils.is_javascript_buffer(bufnr) then
+	if not utils.is_supported_buffer(bufnr) then
 		return
 	end
 
 	local consolelog = require("consolelog")
 	if consolelog.project_root then
-		local buf_path = vim.api.nvim_buf_get_name(bufnr)
-		if buf_path and buf_path ~= "" then
-			if not buf_path:find(consolelog.project_root, 1, true) then
-				local debug_logger = require("consolelog.core.debug_logger")
-				debug_logger.log("DISPLAY",
-					string.format("Buffer %d (%s) not in project %s - ignoring",
-						bufnr, buf_path, consolelog.project_root))
-				return
+		-- Exempt explicitly run single-file sessions from project-root containment:
+		-- these buffers were started via :ConsoleLogRun and should receive output
+		-- regardless of whether they live inside a JS project root.
+		local inspector = require("consolelog.communication.inspector")
+		if not inspector.single_file_buffers or not inspector.single_file_buffers[bufnr] then
+			local buf_path = vim.api.nvim_buf_get_name(bufnr)
+			if buf_path and buf_path ~= "" then
+				if not buf_path:find(consolelog.project_root, 1, true) then
+					local debug_logger = require("consolelog.core.debug_logger")
+					debug_logger.log("DISPLAY",
+						string.format("Buffer %d (%s) not in project %s - ignoring",
+							bufnr, buf_path, consolelog.project_root))
+					return
+				end
 			end
 		end
 	end
