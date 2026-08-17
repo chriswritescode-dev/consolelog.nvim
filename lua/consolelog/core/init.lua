@@ -314,6 +314,7 @@ function M.run_buffer(bufnr, winid)
 	end
 
 	-- Clear any stale outputs from previous runs (including completed sessions)
+	M.outputs[bufnr] = {}
 	require("consolelog.display.display").clear_buffer(bufnr)
 
 	-- Clean any existing session from BOTH runners (handles buffer renamed between JS and Python)

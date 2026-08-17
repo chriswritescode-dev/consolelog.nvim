@@ -5,6 +5,7 @@ local it = helper.it
 
 package.path = package.path .. ";./lua/?.lua"
 local display = require('consolelog.display.display')
+local vtext_builder = require('consolelog.display.virtual_text_builder')
 local parser = require('consolelog.processing.parser')
 local formatter = require('consolelog.processing.formatter')
 local constants = require('consolelog.core.constants')
@@ -330,6 +331,75 @@ describe("Display Module", function()
       assert.equals(#output.history, 2, "Should have 2 history entries")
     end)
 
+    it("should keep every value when updates coalesce in one throttle window", function()
+      setup()
+      consolelog_mock.config.history.enabled = true
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      display.update_output(test_bufnr, 1, "7", "log")
+      display.update_output(test_bufnr, 1, "2", "log")
+      display.apply_pending_updates(test_bufnr)
+
+      local output = consolelog_mock.outputs[test_bufnr][1]
+      assert.equals(output.execution_count, 2, "Should count both executions of the same line")
+      assert.equals(#output.history, 2, "Should keep both coalesced values")
+      assert.equals(output.history[1].value, "2", "Newest value should be first")
+      assert.equals(output.history[2].value, "7", "Coalesced value should be retained")
+    end)
+
+    it("should render every recorded value inline", function()
+      setup()
+      consolelog_mock.config.history.enabled = true
+      consolelog_mock.config.history.show_indicator = true
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      display.update_output(test_bufnr, 1, "7", "log")
+      display.update_output(test_bufnr, 1, "2", "log")
+      display.apply_pending_updates(test_bufnr)
+
+      local virt_lines = vtext_builder.build_virtual_text(
+        consolelog_mock.outputs[test_bufnr][1], consolelog_mock.config)
+      local text = virt_lines[1][2][1]
+
+      assert.is_true(text:find("7, 2", 1, true) ~= nil, "Should show all values in execution order")
+      assert.is_true(text:find("[×2]", 1, true) ~= nil, "Should keep the execution count")
+    end)
+
+    it("should cap inline values and mark truncation", function()
+      setup()
+      consolelog_mock.config.history.enabled = true
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      for i = 1, constants.DISPLAY.MAX_INLINE_VALUES + 2 do
+        display.update_output(test_bufnr, 1, tostring(i), "log")
+      end
+      display.apply_pending_updates(test_bufnr)
+
+      local virt_lines = vtext_builder.build_virtual_text(
+        consolelog_mock.outputs[test_bufnr][1], consolelog_mock.config)
+      local text = virt_lines[1][2][1]
+
+      assert.is_true(text:find("1, 2, 3, 4, 5", 1, true) ~= nil, "Should show the first values in order")
+      assert.is_true(text:find("...", 1, true) ~= nil, "Should mark truncated values")
+    end)
+
+    it("should show only the latest value when history is disabled", function()
+      setup()
+      consolelog_mock.config.history.enabled = false
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      display.update_output(test_bufnr, 1, "7", "log")
+      display.update_output(test_bufnr, 1, "2", "log")
+      display.apply_pending_updates(test_bufnr)
+
+      local virt_lines = vtext_builder.build_virtual_text(
+        consolelog_mock.outputs[test_bufnr][1], consolelog_mock.config)
+      local text = virt_lines[1][2][1]
+
+      assert.is_true(text:find("2", 1, true) ~= nil, "Should show the latest value")
+      assert.is_true(text:find("7", 1, true) == nil, "Should not show earlier values")
+    end)
+
     it("should limit history size", function()
       setup()
       consolelog_mock.config.history.enabled = true
@@ -561,7 +631,7 @@ describe("Display Module", function()
       setup()
 
       local value = "test"
-      local formatted = formatter.format_for_inline(value, consolelog_mock.config)
+      local formatted = formatter.format_values_for_inline({ value }, consolelog_mock.config)
       assert.not_nil(formatted, "Should format output")
       assert.is_true(formatted:find("test") ~= nil, "Should contain the value")
     end)

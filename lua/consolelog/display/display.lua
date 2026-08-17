@@ -245,11 +245,13 @@ function M.update_output(bufnr, line, value, console_type, raw_value)
 		M.pending_updates[bufnr] = {}
 	end
 
-	local existing_output = nil
-	for _, output in ipairs(consolelog.outputs[bufnr] or {}) do
-		if output.line == line then
-			existing_output = output
-			break
+	local existing_output = M.pending_updates[bufnr][line]
+	if not existing_output then
+		for _, output in ipairs(consolelog.outputs[bufnr] or {}) do
+			if output.line == line then
+				existing_output = output
+				break
+			end
 		end
 	end
 

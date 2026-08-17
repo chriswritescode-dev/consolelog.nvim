@@ -103,7 +103,10 @@ end
 function M.format_value(value, opts)
 	opts = opts or {}
 	local mode = opts.mode or "inline"
-	local max_width = opts.max_width or (mode == "inline" and 60 or 1000)
+	local max_width = opts.max_width
+	if not max_width or max_width <= 0 then
+		max_width = mode == "inline" and 60 or 1000
+	end
 	local depth = opts.depth
 	local utils = require("consolelog.core.utils")
 
@@ -182,13 +185,28 @@ function M.format_value(value, opts)
 	end
 end
 
-function M.format_for_inline(value, config)
+local function inline_value(value, config)
 	local formatted = M.format_value(value, {
 		mode = "inline",
 		max_width = config.display.max_width
 	})
-	formatted = formatted:gsub("\n", " ")
-	return string.format("%s%s", config.display.prefix, formatted)
+	return (formatted:gsub("\n", " "))
+end
+
+function M.format_values_for_inline(values, config, max_values)
+	local constants = require("consolelog.core.constants")
+	local shown = math.min(#values, max_values or #values)
+	local parts = {}
+
+	for i = 1, shown do
+		table.insert(parts, inline_value(values[i], config))
+	end
+
+	if #values > shown then
+		table.insert(parts, config.display.truncate_marker or constants.DISPLAY.TRUNCATE_MARKER)
+	end
+
+	return string.format("%s%s", config.display.prefix, table.concat(parts, ", "))
 end
 
 function M.format_for_hover(value)

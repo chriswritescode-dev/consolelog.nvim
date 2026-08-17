@@ -630,9 +630,12 @@ describe("Single File Run", function()
       end
 
       local core = require("consolelog.core.init")
+      core.outputs[test_bufnr] = { { line = 1, value = "stale", execution_count = 3 } }
       core.run_buffer(test_bufnr, winid)
 
       assert.equals(1, start_session_mock.call_count)
+      assert.is_true(vim.tbl_isempty(core.outputs[test_bufnr]),
+        "outputs from the previous run must not leak into the new run")
 
       vim.api.nvim_buf_get_name = real_buf_get_name
       vim.fn.filereadable = real_filereadable

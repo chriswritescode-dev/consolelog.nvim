@@ -1,6 +1,7 @@
 local M = {}
 
 local formatter = require("consolelog.processing.formatter")
+local constants = require("consolelog.core.constants")
 
 function M.get_highlight_groups(console_type)
   local highlight_map = {
@@ -34,12 +35,31 @@ function M.get_highlight_groups(console_type)
   return highlight_map[console_type] or highlight_map.log
 end
 
-function M.format_value_for_display(value, raw_value, config)
+function M.collect_inline_values(output, config)
   -- Always use `value` for inline virtual text.  `raw_value` carries the
   -- full representation (parsed table or multiline exception stack) that the
   -- float inspector should show; forcing it inline would flatten exception
   -- stacks into a single display line.
-  return formatter.format_for_inline(value, config)
+  local history = output.history
+
+  if not config.history or not config.history.enabled or not history or #history == 0 then
+    return { output.value }
+  end
+
+  local values = {}
+  for i = #history, 1, -1 do
+    table.insert(values, history[i].value)
+  end
+
+  return values
+end
+
+function M.format_value_for_display(output, config)
+  return formatter.format_values_for_inline(
+    M.collect_inline_values(output, config),
+    config,
+    constants.DISPLAY.MAX_INLINE_VALUES
+  )
 end
 
 function M.add_execution_count(text, count, config)
@@ -90,7 +110,7 @@ function M.build_virtual_text(output, config)
   local console_type = output.console_type or "log"
   local highlights = M.get_highlight_groups(console_type)
   
-  local formatted = M.format_value_for_display(output.value, output.raw_value, config)
+  local formatted = M.format_value_for_display(output, config)
   formatted = M.add_execution_count(formatted, output.execution_count, config)
 
   local max_width = config.display.max_width or 0
