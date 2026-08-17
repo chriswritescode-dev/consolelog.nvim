@@ -60,7 +60,7 @@ function M.detect_framework_from_deps(deps)
 		return M.FRAMEWORKS.VUE
 	elseif deps["svelte"] and not deps["vite"] then
 		return M.FRAMEWORKS.SVELTE
-	elseif (deps["react"] or deps["react-dom"]) and not deps["vite"] then
+	elseif (deps["react"] or deps["react-dom"]) and not deps["vite"] and not deps["react-native"] then
 		return M.FRAMEWORKS.REACT
 	end
 

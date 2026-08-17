@@ -81,7 +81,8 @@ M.FILES = {
 M.INJECTION = {
 	START_MARKER = "// ConsoleLog.nvim auto-injection start",
 	END_MARKER = "// ConsoleLog.nvim auto-injection end",
-	BLOCK_PATTERN = "// ConsoleLog%.nvim auto%-injection start.-// ConsoleLog%.nvim auto%-injection end\n?"
+	BLOCK_PATTERN = "// ConsoleLog%.nvim auto%-injection start.-// ConsoleLog%.nvim auto%-injection end\n?",
+	BROWSER_GUARD = "if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {"
 }
 
 M.LOG_LEVELS = {

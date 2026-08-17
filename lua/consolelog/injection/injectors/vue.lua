@@ -100,7 +100,7 @@ function M.patch(project_root, ws_port)
   end
 
   local inject_script = constants.INJECTION.START_MARKER .. "\n" .. string.format([[
-if (typeof window !== 'undefined') {
+%s
   window.__CONSOLELOG_WS_PORT = %d;
   window.__CONSOLELOG_PROJECT_ID = '%s';
   window.__CONSOLELOG_FRAMEWORK = 'Vue';
@@ -108,7 +108,7 @@ if (typeof window !== 'undefined') {
   %s
   %s
 }
-]], ws_port, project_id, sourcemap_content, inject_content) .. constants.INJECTION.END_MARKER
+]], constants.INJECTION.BROWSER_GUARD, ws_port, project_id, sourcemap_content, inject_content) .. constants.INJECTION.END_MARKER
 
   for _, file in ipairs(VUE_FILES) do
     local found_file = false

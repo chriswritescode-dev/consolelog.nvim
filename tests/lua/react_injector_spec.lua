@@ -117,6 +117,16 @@ describe("React Injector Tests", function()
       
       cleanup()
     end)
+
+    it("should not detect React Native project", function()
+      setup()
+      create_package_json('{"dependencies": {"react": "^18.0.0", "react-native": "^0.72.0"}}')
+      
+      local detected = react_injector.detect(project_root)
+      assert.is_false(detected, "Should not detect React when React Native is present")
+      
+      cleanup()
+    end)
   end)
   
   describe("React Patching", function()
@@ -132,6 +142,8 @@ describe("React Injector Tests", function()
       assert.is_true(has_injection(index_content), "index.js should contain injection")
       assert.is_true(index_content:find("window.__CONSOLELOG_WS_PORT = 19990") ~= nil,
         "Patched content should contain port 19990")
+      assert.is_true(index_content:find("typeof window.addEventListener === 'function'") ~= nil,
+        "Patched content should guard on window.addEventListener")
       assert.is_true(backup_exists(index_path), "index.js backup should exist")
       
       cleanup()
@@ -254,7 +266,7 @@ function checkDCE() {
       local index_path, client_path, webpack_path = create_react_files()
 
       local marker_block = "// ConsoleLog.nvim auto-injection start\n" ..
-        "if (typeof window !== 'undefined') {\n" ..
+        "if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {\n" ..
         "  window.__CONSOLELOG_WS_PORT = 19990;\n" ..
         "  window.__CONSOLELOG_PROJECT_ID = 'test';\n" ..
         "  window.__CONSOLELOG_FRAMEWORK = 'React';\n" ..

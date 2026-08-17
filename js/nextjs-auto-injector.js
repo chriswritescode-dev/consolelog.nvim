@@ -45,7 +45,7 @@
       }
 
       const injection = `${START_MARKER}
-if (typeof window !== "undefined") {
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.__CONSOLELOG_WS_PORT = ${WS_PORT};
   window.__CONSOLELOG_PROJECT_ID = "${PROJECT_ID}";
   window.__CONSOLELOG_FRAMEWORK = "Next.js";

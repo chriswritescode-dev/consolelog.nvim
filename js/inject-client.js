@@ -1,5 +1,5 @@
 (function () {
-  if (typeof window === "undefined" || window.__consolelogInjected) return;
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function" || window.__consolelogInjected) return;
   window.__consolelogInjected = true;
   window.__consolelogEnabled = true;
 

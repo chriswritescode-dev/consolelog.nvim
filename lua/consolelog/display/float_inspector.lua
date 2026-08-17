@@ -2,6 +2,19 @@ local M = {}
 
 local formatter = require("consolelog.processing.formatter")
 
+-- Outputs are listed in source order (grouped per file, ascending line) so the
+-- listing reads top-down like the file it came from.
+function M.compare_by_source_position(a, b)
+	if a.bufnr ~= b.bufnr then
+		local a_name, b_name = a.bufname or "", b.bufname or ""
+		if a_name ~= b_name then
+			return a_name < b_name
+		end
+		return (a.bufnr or 0) < (b.bufnr or 0)
+	end
+	return (a.line or 0) < (b.line or 0)
+end
+
 -- Create a floating window with the content
 function M.open_inspector(content, opts)
 	opts = opts or {}
@@ -30,7 +43,7 @@ function M.open_inspector(content, opts)
 	local buf = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, formatted_lines)
 
-	vim.bo[buf].filetype = "lua"
+	vim.bo[buf].filetype = "javascript"
 	vim.bo[buf].bufhidden = "wipe"
 	vim.bo[buf].modifiable = false
 	vim.bo[buf].readonly = true
@@ -198,7 +211,7 @@ function M.open_inspector_with_history(outputs, bufnr, line, use_split)
 	refresh_content()
 
 	-- Set buffer options
-	vim.bo[buf].filetype = "lua"
+	vim.bo[buf].filetype = "javascript"
 	vim.bo[buf].bufhidden = "wipe"
 	vim.bo[buf].modifiable = false
 	vim.bo[buf].readonly = true
@@ -415,16 +428,7 @@ function M.inspect_all(all_outputs, all_unmatched_outputs)
 			return
 		end
 
-		-- Sort by timestamp if available, or by buffer/line
-		table.sort(collected_outputs, function(a, b)
-			if a.timestamp and b.timestamp then
-				return a.timestamp > b.timestamp -- Most recent first
-			elseif a.bufnr == b.bufnr then
-				return a.line < b.line
-			else
-				return a.bufnr < b.bufnr
-			end
-		end)
+		table.sort(collected_outputs, M.compare_by_source_position)
 
 		-- Combine all outputs with file context
 		local lines = {}
@@ -691,15 +695,7 @@ function M.inspect_buffer(buffer_outputs, buffer_unmatched_outputs)
 			return
 		end
 
-		table.sort(all_outputs, function(a, b)
-			if a.timestamp and b.timestamp then
-				return a.timestamp > b.timestamp
-			elseif a.bufnr == b.bufnr then
-				return a.line < b.line
-			else
-				return a.bufnr < b.bufnr
-			end
-		end)
+		table.sort(all_outputs, M.compare_by_source_position)
 
 		local lines = {}
 		local line_map = {}

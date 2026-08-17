@@ -2,6 +2,10 @@ local M = {}
 
 M.pending_responses = {}
 
+-- Must match the sourceURL comment in js/node-console-format.js: frames from
+-- the injected console hook are never the origin of a log.
+M.CONSOLE_FORMAT_SOURCE_URL = "consolelog-node-format.js"
+
 local CONSOLE_TYPE_MAP = {
 	error = "error",
 	warning = "warn",
@@ -158,15 +162,17 @@ function M.handle_console_event(session, params)
 
 	local converted = {}
 	for _, arg in ipairs(args) do
-		table.insert(converted, M.remote_object_to_arg(arg))
+		table.insert(converted, tostring(M.remote_object_to_arg(arg)))
 	end
 
+	-- Arguments are already rendered by the debuggee (see
+	-- js/node-console-format.js), so they are displayed verbatim rather than
+	-- re-serialized.
+	local output = table.concat(converted, " ")
 	local display = require("consolelog.display.display")
-	local message_processor = require("consolelog.processing.message_processor_impl")
 
 	vim.schedule(function()
-		local output, raw_value = message_processor.format_args(converted, method)
-		display.update_output(session.bufnr, line, output, method, raw_value)
+		display.update_output(session.bufnr, line, output, method, output)
 	end)
 end
 
@@ -220,10 +226,9 @@ function M.extract_line_number(stackTrace, filepath)
 		end
 	end
 
-	if #stackTrace.callFrames > 0 then
-		local first_frame = stackTrace.callFrames[1]
-		if first_frame.lineNumber then
-			return first_frame.lineNumber + 1
+	for _, frame in ipairs(stackTrace.callFrames) do
+		if frame.lineNumber and frame.url ~= M.CONSOLE_FORMAT_SOURCE_URL then
+			return frame.lineNumber + 1
 		end
 	end
 

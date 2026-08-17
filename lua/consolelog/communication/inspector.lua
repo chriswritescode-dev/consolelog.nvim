@@ -20,8 +20,10 @@ function M.parse_node_version(version_string)
 end
 
 function M.build_run_command(filepath, version)
+	-- --inspect-brk (not --inspect) so the script only starts once the console
+	-- formatting hook is installed; otherwise early logs arrive unformatted.
 	if not constants.is_typescript_file(filepath) then
-		return { "node", "--inspect=0", filepath }
+		return { "node", "--inspect-brk=0", filepath }
 	end
 
 	if not version then
@@ -29,11 +31,11 @@ function M.build_run_command(filepath, version)
 	end
 
 	if version.major > 23 or (version.major == 23 and version.minor >= 6) then
-		return { "node", "--inspect=0", filepath }
+		return { "node", "--inspect-brk=0", filepath }
 	end
 
 	if (version.major == 23 and version.minor < 6) or (version.major == 22 and version.minor >= 6) then
-		return { "node", "--inspect=0", "--experimental-strip-types", filepath }
+		return { "node", "--inspect-brk=0", "--experimental-strip-types", filepath }
 	end
 
 	return nil, string.format("TypeScript single-file run requires Node >= 22.6 (found v%d.%d.%d)",
@@ -240,6 +242,33 @@ function M.get_session_id(session)
 	return nil
 end
 
+function M.get_console_format_script()
+	local path = require("consolelog.core.utils").plugin_root() .. "js/node-console-format.js"
+	if vim.fn.filereadable(path) ~= 1 then
+		return nil
+	end
+	return table.concat(vim.fn.readfile(path), "\n")
+end
+
+-- Formats console arguments inside the debuggee with util.inspect, so values
+-- arrive as a snapshot taken at log time instead of a shallow CDP preview of a
+-- possibly mutated object.
+function M.install_console_formatting(session)
+	local debug_logger = require("consolelog.core.debug_logger")
+	local script = M.get_console_format_script()
+
+	if not script then
+		debug_logger.log("INSPECTOR", "node-console-format.js missing, using CDP previews")
+		return false
+	end
+
+	return M.send_command(session, "Runtime.evaluate", {
+		expression = script,
+		returnByValue = true,
+		includeCommandLineAPI = false,
+	})
+end
+
 function M.initialize_runtime(session)
 	local debug_logger = require("consolelog.core.debug_logger")
 	vim.schedule(function()
@@ -250,6 +279,8 @@ function M.initialize_runtime(session)
 			debug_logger.log("INSPECTOR", "Failed to initialize runtime or debugger")
 			return
 		end
+
+		M.install_console_formatting(session)
 
 		vim.defer_fn(function()
 			local run_ok = M.send_command(session, "Runtime.runIfWaitingForDebugger", {})

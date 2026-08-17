@@ -3,6 +3,7 @@ local M = {}
 local line_matching = require("consolelog.processing.line_matching")
 local display = require("consolelog.display.display")
 local debug_logger = require("consolelog.core.debug_logger")
+local formatter = require("consolelog.processing.formatter")
 
 function M.format_args(args, method, preserve_literals)
 	if not args or #args == 0 then
@@ -27,61 +28,17 @@ function M.format_args(args, method, preserve_literals)
 
 	for _, arg in ipairs(args) do
 		if type(arg) == "string" then
-			if arg:match("^%s*[{%[]") and arg:match("[}%]]%s*$") then
-				local ok, parsed = pcall(vim.fn.json_decode, arg)
-				if ok and type(parsed) == "table" then
-					local count = 0
-					local is_array = vim.islist(parsed)
-
-					if is_array then
-						count = #parsed
-					else
-						for _ in pairs(parsed) do
-							count = count + 1
-						end
-					end
-
-					if count <= 3 then
-						table.insert(formatted_args,
-							vim.inspect(parsed, { indent = "", newline = " " }))
-						table.insert(raw_args, parsed)
-					else
-						local preview
-						if is_array then
-							preview = string.format("[%d items]", count)
-						else
-							local keys = {}
-							local i = 0
-							for k, _ in pairs(parsed) do
-								if i < 3 then
-									table.insert(keys, k)
-									i = i + 1
-								else
-									break
-								end
-							end
-							preview = "{" .. table.concat(keys, ", ")
-							if count > 3 then
-								preview = preview .. ", ..."
-							end
-							preview = preview .. "}"
-						end
-						preview = preview .. " [→ li]"
-						table.insert(formatted_args, preview)
-						table.insert(raw_args, parsed)
-					end
-				else
-					table.insert(formatted_args, arg)
-					table.insert(raw_args, arg)
-				end
+			local ok, parsed = pcall(vim.json.decode, arg)
+			if ok and type(parsed) == "table" then
+				table.insert(formatted_args, formatter.render_json(parsed))
+				table.insert(raw_args, parsed)
 			else
 				table.insert(formatted_args, arg)
 				table.insert(raw_args, arg)
 			end
 		elseif type(arg) == "table" then
+			table.insert(formatted_args, formatter.render_json(arg))
 			table.insert(raw_args, arg)
-			local formatted = vim.inspect(arg, { indent = "", newline = " " })
-			table.insert(formatted_args, formatted)
 		else
 			table.insert(formatted_args, tostring(arg))
 			table.insert(raw_args, arg)

@@ -4,6 +4,11 @@ function M.get_timestamp()
 	return vim.loop.hrtime() / 1000000
 end
 
+function M.plugin_root()
+	local current_file = debug.getinfo(1, "S").source:sub(2)
+	return vim.fn.fnamemodify(current_file, ":p:h:h:h:h") .. "/"
+end
+
 function M.is_javascript_file(file)
 	if not file or file == "" then
 		return false
