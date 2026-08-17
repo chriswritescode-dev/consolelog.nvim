@@ -96,6 +96,42 @@ function M.extract_frame(buffer)
   }, remaining, nil
 end
 
+function M.drain_messages(buffer, fragments)
+  local messages = {}
+  local rest = buffer or ""
+  fragments = fragments or {}
+
+  while #rest > 0 do
+    local frame, remaining = M.extract_frame(rest)
+    if not frame then
+      break
+    end
+    rest = remaining or ""
+
+    if frame.opcode == M.OPCODES.CONTINUATION then
+      if fragments.opcode then
+        fragments.payload = fragments.payload .. frame.payload
+        if frame.fin then
+          table.insert(messages, { opcode = fragments.opcode, payload = fragments.payload })
+          fragments.opcode = nil
+          fragments.payload = nil
+        end
+      end
+    elseif frame.opcode == M.OPCODES.TEXT or frame.opcode == M.OPCODES.BINARY then
+      if frame.fin then
+        table.insert(messages, { opcode = frame.opcode, payload = frame.payload })
+      else
+        fragments.opcode = frame.opcode
+        fragments.payload = frame.payload
+      end
+    else
+      table.insert(messages, { opcode = frame.opcode, payload = frame.payload })
+    end
+  end
+
+  return messages, rest, fragments
+end
+
 function M.unmask_payload(payload, mask_key)
   local unmasked = {}
   for i = 1, #payload do
