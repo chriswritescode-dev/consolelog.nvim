@@ -5,6 +5,7 @@ local it = helper.it
 
 package.path = package.path .. ";./lua/?.lua"
 local display = require('consolelog.display.display')
+local extmark_writer = require('consolelog.display.extmark_writer')
 local vtext_builder = require('consolelog.display.virtual_text_builder')
 local float_inspector = require('consolelog.display.float_inspector')
 local parser = require('consolelog.processing.parser')
@@ -757,6 +758,119 @@ describe("Display Module", function()
       display.show_outputs(test_bufnr)
 
       assert.equals(display.last_show_time[test_bufnr], first_time, "Should throttle rapid calls")
+    end)
+  end)
+
+  describe("Annotation virtual text", function()
+    it("should build a single chunk row for a short explanation", function()
+      setup()
+      consolelog_mock.config.explain = { prefix = " ⟩ ", max_width = 0 }
+
+      local virt_lines, is_multiline = vtext_builder.build_annotation_virtual_text(
+        "adds the two totals", consolelog_mock.config)
+
+      assert.is_false(is_multiline, "Short explanation should not wrap")
+      assert.equals(#virt_lines, 1, "Should produce one chunk row")
+
+      local text = ""
+      for _, segment in ipairs(virt_lines[1]) do
+        text = text .. segment[1]
+      end
+      assert.is_true(text:find(" ⟩ adds the two totals", 1, true) ~= nil,
+        "Should contain the prefix and the explanation, got: " .. text)
+      assert.equals(virt_lines[1][2][2], "ConsoleLogExplain",
+        "Middle chunk should use the explain highlight")
+    end)
+
+    it("should wrap long explanations into multiple chunk rows", function()
+      setup()
+      consolelog_mock.config.explain = { prefix = " ⟩ ", max_width = 12 }
+
+      local virt_lines, is_multiline = vtext_builder.build_annotation_virtual_text(
+        "adds the two totals together to produce the final sum", consolelog_mock.config)
+
+      assert.is_true(is_multiline, "Long explanation should wrap")
+      assert.is_true(#virt_lines > 1, "Should produce more than one chunk row")
+      for _, row in ipairs(virt_lines) do
+        assert.equals(row[2][2], "ConsoleLogExplain", "Every row should use the explain highlight")
+      end
+    end)
+
+    it("should map explain to its own highlight group and fall back for unknown types", function()
+      assert.equals(vtext_builder.get_highlight_groups("explain").main, "ConsoleLogExplain")
+      assert.equals(vtext_builder.get_highlight_groups("log").main, "ConsoleLogOutput")
+      assert.equals(vtext_builder.get_highlight_groups("unknown").main, "ConsoleLogOutput")
+    end)
+  end)
+
+  describe("Extmark write path", function()
+    it("should create a single extmark with virt_text for a one-row chunk", function()
+      setup()
+      local single_row = {
+        { " ", "ConsoleLogOutputLeft" },
+        { "test", "ConsoleLogOutput" },
+        { " ", "ConsoleLogOutputRight" },
+      }
+
+      local mark_id = extmark_writer.write_virt_lines(
+        test_bufnr, consolelog_mock.namespace, 0, { single_row }, false, 250, "eol")
+
+      assert.not_nil(mark_id, "Should return a mark id")
+
+      local extmarks = vim.api.nvim_buf_get_extmarks(
+        test_bufnr,
+        consolelog_mock.namespace,
+        0,
+        -1,
+        { details = true }
+      )
+      assert.equals(#extmarks, 1, "Should create exactly one extmark")
+      assert.deep_equals(extmarks[1][4].virt_text, single_row, "virt_text should hold the chunk row")
+      assert.is_nil(extmarks[1][4].virt_lines, "virt_lines should not be set")
+    end)
+
+    it("should create a single extmark with virt_lines for a multi-row chunk", function()
+      setup()
+      local three_rows = {
+        { { " ", "ConsoleLogOutputLeft" }, { "row one", "ConsoleLogOutput" }, { " ", "ConsoleLogOutputRight" } },
+        { { " ", "ConsoleLogOutputLeft" }, { "row two", "ConsoleLogOutput" }, { " ", "ConsoleLogOutputRight" } },
+        { { " ", "ConsoleLogOutputLeft" }, { "row three", "ConsoleLogOutput" }, { " ", "ConsoleLogOutputRight" } },
+      }
+
+      local mark_id = extmark_writer.write_virt_lines(
+        test_bufnr, consolelog_mock.namespace, 0, three_rows, true, 250)
+
+      assert.not_nil(mark_id, "Should return a mark id")
+
+      local extmarks = vim.api.nvim_buf_get_extmarks(
+        test_bufnr,
+        consolelog_mock.namespace,
+        0,
+        -1,
+        { details = true }
+      )
+      assert.equals(#extmarks, 1, "Should create exactly one extmark")
+      assert.deep_equals(extmarks[1][4].virt_text, three_rows[1], "virt_text should hold the first row")
+      assert.deep_equals(extmarks[1][4].virt_lines, { three_rows[2], three_rows[3] },
+        "virt_lines should hold the trailing rows")
+    end)
+
+    it("should return nil and create no extmark for an empty chunk list", function()
+      setup()
+
+      local mark_id = extmark_writer.write_virt_lines(
+        test_bufnr, consolelog_mock.namespace, 0, {}, false, 250)
+
+      assert.is_nil(mark_id, "Should return nil for empty virt_lines")
+
+      local extmarks = vim.api.nvim_buf_get_extmarks(
+        test_bufnr,
+        consolelog_mock.namespace,
+        0,
+        -1,
+        {}
+      )
+      assert.equals(#extmarks, 0, "Should create no extmark")
     end)
   end)
 end)

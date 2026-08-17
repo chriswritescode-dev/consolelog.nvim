@@ -63,6 +63,18 @@ function M.create_multiline_extmark(buf, namespace, curline, virt_lines, priorit
   return ok and mark_id or nil
 end
 
+function M.write_virt_lines(buf, namespace, line, virt_lines, is_multiline, priority, pos)
+  if not virt_lines or #virt_lines == 0 then
+    return
+  end
+
+  if is_multiline and #virt_lines > 1 then
+    return M.create_multiline_extmark(buf, namespace, line, virt_lines, priority)
+  end
+
+  return M.create_single_extmark(buf, namespace, line, virt_lines[1], nil, priority, pos or "eol")
+end
+
 function M.create_overflow_extmarks(buf, namespace, params)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return

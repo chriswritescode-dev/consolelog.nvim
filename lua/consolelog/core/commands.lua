@@ -34,6 +34,24 @@ function M.setup()
 		require("consolelog.display.float_inspector").inspect_buffer(buffer_outputs, buffer_unmatched)
 	end, { desc = "Show all console outputs for current buffer" })
 
+	vim.api.nvim_create_user_command("ConsoleLogExplain", function(opts)
+		local bufnr = vim.api.nvim_get_current_buf()
+		local explain = require("consolelog.explain")
+		if opts.range == 0 then
+			explain.explain_range(bufnr, 1, vim.api.nvim_buf_line_count(bufnr))
+		else
+			explain.explain_range(bufnr, opts.line1, opts.line2)
+		end
+	end, { range = true, desc = "Explain code in English inline (selection or whole buffer)" })
+
+	vim.api.nvim_create_user_command("ConsoleLogExplainClear", function()
+		require("consolelog.explain").clear(vim.api.nvim_get_current_buf())
+	end, { desc = "Clear inline code explanations" })
+
+	vim.api.nvim_create_user_command("ConsoleLogExplainToggle", function()
+		require("consolelog.explain").toggle(vim.api.nvim_get_current_buf())
+	end, { desc = "Toggle visibility of inline code explanations" })
+
 	vim.api.nvim_create_user_command("ConsoleLogDebugToggle", function()
 		require("consolelog.core.debug_logger").toggle()
 	end, { desc = "Toggle debug logging on/off" })

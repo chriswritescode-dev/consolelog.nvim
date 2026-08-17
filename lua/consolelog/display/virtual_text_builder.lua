@@ -31,6 +31,11 @@ function M.get_highlight_groups(console_type)
       left = "ConsoleLogDebugLeft",
       right = "ConsoleLogDebugRight",
     },
+    explain = {
+      main = "ConsoleLogExplain",
+      left = "ConsoleLogExplainLeft",
+      right = "ConsoleLogExplainRight",
+    },
   }
 
   return highlight_map[console_type] or highlight_map.log
@@ -101,55 +106,47 @@ function M.split_into_lines(text, max_width)
   return #lines > 0 and lines or { text }
 end
 
+function M.build_chunks(text, highlights, max_width)
+  if max_width > 0 and vim.fn.strdisplaywidth(text) > max_width then
+    local lines = M.split_into_lines(text, max_width)
+    local virt_lines = {}
+
+    for _, line in ipairs(lines) do
+      table.insert(virt_lines, {
+        { "", highlights.left },
+        { " " .. line .. " ", highlights.main },
+        { "", highlights.right }
+      })
+    end
+
+    return virt_lines, true
+  end
+
+  return { {
+    { "", highlights.left },
+    { " " .. text .. " ", highlights.main },
+    { "", highlights.right }
+  } }, false
+end
+
 function M.build_virtual_text(output, config)
   local console_type = output.console_type or "log"
   local highlights = M.get_highlight_groups(console_type)
-  
+
   local formatted = M.format_value_for_display(output, config)
   formatted = M.add_execution_count(formatted, output.execution_count, config)
 
-  local max_width = config.display.max_width or 0
-  
-  if max_width > 0 and vim.fn.strdisplaywidth(formatted) > max_width then
-    local lines = M.split_into_lines(formatted, max_width)
-    local virt_lines = {}
-    
-    for i, line in ipairs(lines) do
-      if i == 1 then
-        table.insert(virt_lines, {
-          { "", highlights.left },
-          { " " .. line .. " ", highlights.main },
-          { "", highlights.right }
-        })
-      else
-        table.insert(virt_lines, {
-          { "", highlights.left },
-          { " " .. line .. " ", highlights.main },
-          { "", highlights.right }
-        })
-      end
-    end
-    
-    return virt_lines, true
-  else
-    return { {
-      { "", highlights.left },
-      { " " .. formatted .. " ", highlights.main },
-      { "", highlights.right }
-    } }, false
-  end
+  return M.build_chunks(formatted, highlights, config.display.max_width or 0)
 end
 
-function M.get_highlight_for_type(console_type, config)
-  local highlights = {
-    log = "ConsoleLogOutput",
-    error = "ConsoleLogError",
-    warn = "ConsoleLogWarning",
-    info = "ConsoleLogInfo",
-    debug = "ConsoleLogDebug",
-  }
+function M.build_annotation_virtual_text(text, config)
+  local explain = config.explain or {}
+  local highlights = M.get_highlight_groups("explain")
 
-  return highlights[console_type] or config.display.highlight
+  local prefixed = (explain.prefix or constants.EXPLAIN.DEFAULT_PREFIX) .. text
+  local max_width = explain.max_width or 0
+
+  return M.build_chunks(prefixed, highlights, max_width)
 end
 
 return M

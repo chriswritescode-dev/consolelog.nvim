@@ -22,6 +22,7 @@ A Neovim plugin that captures and displays console outputs as virtual text inlin
 - Multiple Sessions - Run multiple projects simultaneously with automatic port management
 - Auto-Reconnection - Robust connection handling with exponential backoff
 - Syntax Highlighting - Color-coded output by console type (log, error, warn, info, debug)
+- LLM Code Explanations - Explain a selection or the whole buffer line-by-line in plain English, rendered as virtual text (`<leader>le`)
 
 ## Star This Project
 
@@ -98,6 +99,14 @@ ConsoleLog automatically detects your project type and enables console capture:
 - Press `<Enter>` on any output line to jump to its source location
 - Press `q` or `<Esc>` to close the inspector window
 
+### Explain Commands
+
+| Key | Command | Description |
+|-----|---------|-------------|
+| `<leader>le` | `:ConsoleLogExplain` | Explain code in English inline (selection in visual mode, whole buffer in normal mode) |
+| `<leader>lE` | `:ConsoleLogExplainClear` | Clear inline code explanations |
+| `<leader>lv` | `:ConsoleLogExplainToggle` | Hide/show cached explanations to see the code unobstructed |
+
 ### Debug Commands
 
 | Key | Command | Description |
@@ -148,6 +157,18 @@ The plugin works out of the box with sensible defaults. Here's the full configur
         rerun_on_save = true,    -- Re-run single-file buffers on save after :ConsoleLogRun
         python_executable = nil, -- Override Python interpreter (nil = auto-detect)
       },
+      explain = {
+        provider = "openai",     -- LLM provider: "openai" or "anthropic"
+        model = "gpt-4o-mini",   -- Model used for explanations
+        url = nil,               -- Override API endpoint (e.g. local Ollama)
+        api_key_env = nil,       -- Env var with the API key (nil = provider default, false = no key)
+        temperature = 0,         -- Sampling temperature (false omits the field)
+        max_tokens = 2048,       -- Maximum tokens in the response
+        timeout_ms = 60000,      -- Request timeout in milliseconds
+        max_lines = 300,         -- Maximum lines explained per request
+        prefix = " ⟩ ",          -- Prefix before each explanation
+        max_width = 80,          -- Wrap explanations wider than this into virtual lines below the code
+      },
       keymaps = {
         enabled = true,          -- Enable default keymaps
         toggle = "<leader>lt",   -- Toggle ConsoleLog
@@ -158,6 +179,9 @@ The plugin works out of the box with sensible defaults. Here's the full configur
         inspect_buffer = "<leader>lb", -- Inspect buffer
         reload = "<leader>lR",   -- Reload plugin
         debug_toggle = "<leader>ld", -- Toggle debug logging
+        explain = "<leader>le",  -- Explain code inline (whole buffer)
+        explain_clear = "<leader>lE", -- Clear inline code explanations
+        explain_toggle = "<leader>lv", -- Toggle explanation visibility
       },
     })
   end,
@@ -173,6 +197,9 @@ The plugin works out of the box with sensible defaults. Here's the full configur
     { "<leader>lR", "<cmd>ConsoleLogReload<cr>",       desc = "Reload plugin" },
     { "<leader>lg", "<cmd>ConsoleLogDebug<cr>",        desc = "Open debug log" },
     { "<leader>lG", "<cmd>ConsoleLogDebugClear<cr>",   desc = "Clear debug log" },
+    { "<leader>le", "<cmd>ConsoleLogExplain<cr>",      desc = "Explain code inline (selection or whole buffer)" },
+    { "<leader>lE", "<cmd>ConsoleLogExplainClear<cr>", desc = "Clear inline code explanations" },
+    { "<leader>lv", "<cmd>ConsoleLogExplainToggle<cr>", desc = "Toggle explanation visibility" },
   },
   cmd = {
     "ConsoleLogToggle",
@@ -186,11 +213,36 @@ The plugin works out of the box with sensible defaults. Here's the full configur
     "ConsoleLogReload",
     "ConsoleLogDebug",
     "ConsoleLogDebugClear",
+    "ConsoleLogExplain",
+    "ConsoleLogExplainClear",
+    "ConsoleLogExplainToggle",
   },
   ft = { "javascript", "typescript", "javascriptreact", "typescriptreact", "python" },
 }
 ```
 
+
+### Code Explanations
+
+`:ConsoleLogExplain` sends the selected lines (or the whole buffer) to an LLM and renders a short, behavior-focused explanation of each line as virtual text. The API key is read from an environment variable — `OPENAI_API_KEY` for OpenAI, `ANTHROPIC_API_KEY` for Anthropic — and `curl` must be installed. Explanations work in any regular buffer, unlike runtime console capture which is JavaScript/TypeScript/Python only.
+
+**Local / self-hosted models:** point the `openai` provider at any OpenAI-compatible endpoint — for example [Ollama](https://ollama.com):
+```lua
+explain = {
+  provider = "openai",
+  url = "http://localhost:11434/v1/chat/completions",
+  api_key_env = false, -- no API key required
+  model = "qwen2.5-coder",
+},
+```
+
+**Lifecycle:**
+- Explanations longer than `max_width` (default 80) wrap into virtual lines below the code line — the code is pushed down, never covered.
+- `:ConsoleLogExplainToggle` (`<leader>lv`) hides and shows all of a buffer's explanations instantly, without losing the cache or re-hitting the LLM.
+- Explanations are cached: they follow your edits, survive saves and reloads, and are replaced only by re-running `:ConsoleLogExplain` on the section/buffer or removed by `:ConsoleLogExplainClear`.
+- If you keep editing without re-explaining, annotations can drift from the code's meaning; a reload of externally-changed content re-renders them at their last-saved lines.
+- A response arriving after the buffer changed mid-request is discarded with a warning.
+- `max_lines` (default 300) bounds how many lines a single request explains; `temperature = false` omits the temperature field entirely for models that reject it.
 
 ## Why ConsoleLog.nvim?
 

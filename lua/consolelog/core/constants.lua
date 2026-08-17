@@ -100,6 +100,16 @@ M.CONSOLE_TYPES = {
 	DEBUG = "debug"
 }
 
+M.EXPLAIN = {
+	RESPONSE_KEY = "explanations",
+	HTTP_STATUS_SENTINEL = "__CONSOLELOG_HTTP__",
+	DEFAULT_PREFIX = " ⟩ ",
+	DEFAULT_MAX_LINES = 300,
+	DEFAULT_TIMEOUT_MS = 60000,
+	EXTMARK_PRIORITY = 200,
+	MAX_WORDS = 12
+}
+
 function M.is_single_file_runnable(filepath)
 	for _, pattern in ipairs(M.FILE_PATTERNS.JAVASCRIPT_SINGLE) do
 		if filepath:match(pattern) then

@@ -1,5 +1,7 @@
 local M = {}
 
+local constants = require("consolelog.core.constants")
+
 -- Log level utilities
 local log_levels = {
 	debug = 0,
@@ -77,6 +79,18 @@ M.config = {
 		rerun_on_save = true,
 		python_executable = nil,
 	},
+	explain = {
+		provider = "openai",
+		model = "gpt-4o-mini",
+		url = nil,
+		api_key_env = nil,
+		temperature = 0,
+		max_tokens = 2048,
+		timeout_ms = constants.EXPLAIN.DEFAULT_TIMEOUT_MS,
+		max_lines = constants.EXPLAIN.DEFAULT_MAX_LINES,
+		prefix = constants.EXPLAIN.DEFAULT_PREFIX,
+		max_width = 80,
+	},
 	keymaps = {
 		enabled = true,
 		toggle = "<leader>lt",
@@ -87,6 +101,9 @@ M.config = {
 		inspect_buffer = "<leader>lb",
 		reload = "<leader>lR",
 		debug_toggle = "<leader>ld",
+		explain = "<leader>le",
+		explain_clear = "<leader>lE",
+		explain_toggle = "<leader>lv",
 	},
 }
 

@@ -96,27 +96,15 @@ function M.render_output(bufnr, output)
 		tostring(output.console_type), tostring(is_multiline), #virt_lines))
 
 	local priority = consolelog.config.display.priority or 250
-	local mark_id
-
-	if is_multiline then
-		mark_id = extmark_writer.create_multiline_extmark(
-			bufnr,
-			consolelog.namespace,
-			line_num,
-			virt_lines,
-			priority
-		)
-	else
-		mark_id = extmark_writer.create_single_extmark(
-			bufnr,
-			consolelog.namespace,
-			line_num,
-			virt_lines[1],
-			nil,
-			priority,
-			consolelog.config.display.virtual_text_pos or "eol"
-		)
-	end
+	local mark_id = extmark_writer.write_virt_lines(
+		bufnr,
+		consolelog.namespace,
+		line_num,
+		virt_lines,
+		is_multiline,
+		priority,
+		consolelog.config.display.virtual_text_pos or "eol"
+	)
 
 	if mark_id then
 		debug_logger.log("RENDER", string.format("Created extmark %d with namespace %d",
