@@ -272,7 +272,7 @@ if (typeof window !== 'undefined') {
       -- unpatch only restores from .bk files, so this should be a no-op
       local patched_content = [[
 'use client'
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.__CONSOLELOG_WS_PORT = 9999;
   window.__CONSOLELOG_PROJECT_ID = 'test-project';
   // Injected sourcemap resolver code
@@ -368,7 +368,7 @@ if (typeof window !== 'undefined') {
       setup()
 
       local marker_block = "// ConsoleLog.nvim auto-injection start\n" ..
-        "if (typeof window !== 'undefined') {\n" ..
+        "if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {\n" ..
         "  window.__CONSOLELOG_WS_PORT = 9999;\n" ..
         "  window.__CONSOLELOG_PROJECT_ID = 'test';\n" ..
         "  window.__CONSOLELOG_FRAMEWORK = 'Next.js';\n" ..

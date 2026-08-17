@@ -12,8 +12,7 @@ function M._generate_run_id()
 end
 
 function M.get_plugin_root()
-	local current_file = debug.getinfo(1, "S").source:sub(2)
-	return vim.fn.fnamemodify(current_file, ":p:h:h:h:h") .. "/"
+	return require("consolelog.core.utils").plugin_root()
 end
 
 function M.get_runner_script()

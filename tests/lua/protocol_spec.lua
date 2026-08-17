@@ -524,6 +524,49 @@ describe("Protocol Module", function()
 		end)
 	end)
 
+	describe("handle_console_event", function()
+		it("should display runtime-formatted arguments verbatim", function()
+			setup()
+
+			local session = { bufnr = 1, filepath = "/tmp/t.js" }
+			protocol.handle_console_event(session, {
+				type = "log",
+				args = {
+					{ type = "string", value = "[ 0, 1 ]" },
+					{ type = "string", value = "Map(2) { 1 => 0, 3 => 1 }" },
+				},
+				stackTrace = { callFrames = {
+					{ url = protocol.CONSOLE_FORMAT_SOURCE_URL, lineNumber = 30 },
+					{ url = "file:///tmp/t.js", lineNumber = 4 },
+				} },
+			})
+			helper.async.wait(50)
+
+			local args = update_output_mock.calls[1]
+			assert.equals(args[2], 5, "should attribute the log to the user frame")
+			assert.equals(args[3], "[ 0, 1 ] Map(2) { 1 => 0, 3 => 1 }")
+			assert.equals(args[5], args[3], "raw value keeps the runtime formatting")
+		end)
+
+		it("should never attribute a log to the injected console hook", function()
+			setup()
+
+			local session = { bufnr = 1, filepath = "/tmp/t.js" }
+			protocol.handle_console_event(session, {
+				type = "log",
+				args = { { type = "string", value = "hi" } },
+				stackTrace = { callFrames = {
+					{ url = protocol.CONSOLE_FORMAT_SOURCE_URL, lineNumber = 30 },
+					{ url = "file:///tmp/other.js", lineNumber = 11 },
+				} },
+			})
+			helper.async.wait(50)
+
+			local args = update_output_mock.calls[1]
+			assert.equals(args[2], 12, "should fall back to the first real frame")
+		end)
+	end)
+
 	describe("handle_message routing", function()
 		it("should not error on valid consoleAPICalled JSON", function()
 			setup()

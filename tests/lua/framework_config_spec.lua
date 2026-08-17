@@ -101,6 +101,29 @@ describe("Framework Configuration Tests", function()
       
       vim.fn.system("rm -rf " .. vim.fn.shellescape(temp_dir))
     end)
+    
+    it("should not detect React Native as a browser React project", function()
+      setup()
+      
+      local temp_dir = "/tmp/test_react_native_" .. vim.fn.getpid()
+      vim.fn.mkdir(temp_dir, "p")
+      
+      local package_json = [[{
+        "name": "react-native-app",
+        "dependencies": {
+          "react": "^18.0.0",
+          "react-native": "^0.72.0"
+        }
+      }]]
+      
+      vim.fn.writefile(vim.split(package_json, "\n"), temp_dir .. "/package.json")
+      
+      local framework = framework_detector.detect_framework(temp_dir)
+      assert.equals(framework, framework_detector.FRAMEWORKS.UNKNOWN,
+        "React Native should not be detected as a browser React project")
+      
+      vim.fn.system("rm -rf " .. vim.fn.shellescape(temp_dir))
+    end)
   end)
   
   describe("Vue framework detection", function()

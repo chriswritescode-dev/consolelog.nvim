@@ -2,102 +2,76 @@ local M = {}
 
 
 
-local function prettify_json(json_str)
-	local ok, parsed = pcall(vim.json.decode, json_str)
-	if ok and parsed then
-		local ok2, formatted = pcall(vim.fn.json_encode, parsed)
-		if ok2 and formatted then
-			local lines = {}
-			local indent_level = 0
-			local in_string = false
-			local escape_next = false
-			local line = ""
+local INLINE_LIMIT = 80
+local MAX_RENDER_DEPTH = 8
 
-			for i = 1, #formatted do
-				local char = formatted:sub(i, i)
-
-				if escape_next then
-					line = line .. char
-					escape_next = false
-				elseif char == "\\" and in_string then
-					line = line .. char
-					escape_next = true
-				elseif char == '"' then
-					in_string = not in_string
-					line = line .. char
-				elseif not in_string then
-					if char == "{" or char == "[" then
-						line = line .. char
-						table.insert(lines, string.rep("  ", indent_level) .. line)
-						indent_level = indent_level + 1
-						line = ""
-					elseif char == "}" or char == "]" then
-						if line:match("%S") then
-							table.insert(lines, string.rep("  ", indent_level) .. line)
-							line = ""
-						end
-						indent_level = indent_level - 1
-						table.insert(lines, string.rep("  ", indent_level) .. char)
-					elseif char == "," then
-						line = line .. char
-						table.insert(lines, string.rep("  ", indent_level) .. line)
-						line = ""
-					else
-						line = line .. char
-					end
-				else
-					line = line .. char
-				end
-			end
-
-			if line:match("%S") then
-				table.insert(lines, string.rep("  ", indent_level) .. line)
-			end
-
-			return table.concat(lines, "\n")
-		end
+local function render_scalar(value)
+	if value == nil or value == vim.NIL then
+		return "null"
 	end
-	return json_str
+	if type(value) == "string" then
+		local ok, encoded = pcall(vim.json.encode, value)
+		return ok and encoded or ('"' .. value .. '"')
+	end
+	return tostring(value)
 end
 
-local function format_table_preview(tbl, max_items)
-	max_items = max_items or 2
-	local is_array = vim.islist(tbl)
-	local count = vim.tbl_count(tbl)
-	local preview_parts = {}
-	local i = 0
+local function render_key(key)
+	if type(key) == "string" and key:match("^[%a_][%w_]*$") then
+		return key
+	end
+	return render_scalar(tostring(key))
+end
 
-	for k, v in pairs(tbl) do
-		if i >= max_items then break end
-		i = i + 1
+-- Renders a decoded JSON value the way a JS developer expects to read it:
+-- short containers stay on one line, longer ones break with stable key order.
+local function render_value(value, indent, depth)
+	if type(value) ~= "table" then
+		return render_scalar(value)
+	end
 
-		if is_array then
-			local item_str = type(v) == "table" and "{...}" or tostring(v)
-			if type(v) == "string" then
-				item_str = '"' .. (v:sub(1, 10)) .. (#v > 10 and "..." or "") .. '"'
-			end
-			table.insert(preview_parts, item_str)
-		else
-			local val_preview = type(v) == "table" and "{...}" or tostring(v)
-			if type(v) == "string" then
-				val_preview = '"' .. (v:sub(1, 10)) .. (#v > 10 and "..." or "") .. '"'
-			elseif type(v) == "boolean" or type(v) == "number" then
-				val_preview = tostring(v)
-			end
-			table.insert(preview_parts, tostring(k) .. ": " .. val_preview)
+	local is_list = vim.islist(value)
+	local open, close = is_list and "[" or "{", is_list and "]" or "}"
+
+	if vim.tbl_isempty(value) then
+		return open .. close
+	end
+
+	if depth >= MAX_RENDER_DEPTH then
+		return open .. "..." .. close
+	end
+
+	local child_indent = indent .. "  "
+	local parts = {}
+
+	if is_list then
+		for _, item in ipairs(value) do
+			table.insert(parts, render_value(item, child_indent, depth + 1))
+		end
+	else
+		local keys = vim.tbl_keys(value)
+		table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+		for _, key in ipairs(keys) do
+			table.insert(parts, render_key(key) .. ": " .. render_value(value[key], child_indent, depth + 1))
 		end
 	end
 
-	local preview = table.concat(preview_parts, ", ")
-	if count > max_items then
-		preview = preview .. ", ..." .. (count - max_items) .. " more"
+	local single_line = open .. " " .. table.concat(parts, ", ") .. " " .. close
+	if #single_line + #indent <= INLINE_LIMIT and not single_line:find("\n") then
+		return single_line
 	end
 
-	if is_array then
-		return "[" .. preview .. "]"
-	else
-		return "{" .. preview .. "}"
+	local lines = { open }
+	for i, part in ipairs(parts) do
+		table.insert(lines, child_indent .. part .. (i < #parts and "," or ""))
 	end
+	table.insert(lines, indent .. close)
+
+	return table.concat(lines, "\n")
+end
+
+function M.render_json(value)
+	return render_value(value, "", 0)
 end
 
 function M.format_value(value, opts)
@@ -118,21 +92,15 @@ function M.format_value(value, opts)
 
 	if mode == "inspector" then
 		if type(value) == "string" then
-			if (value:match("^%[") or value:match("^{")) then
-				return prettify_json(value)
-			end
+			-- Values already formatted by the runtime (util.inspect, tracebacks)
+			-- are kept verbatim; only serialized payloads get re-rendered.
 			local ok, parsed = pcall(vim.json.decode, value)
-			if ok and parsed ~= nil then
-				local json = vim.fn.json_encode(parsed)
-				return prettify_json(json)
+			if ok and type(parsed) == "table" then
+				return M.render_json(parsed)
 			end
 			return value
 		elseif type(value) == "table" then
-			local ok, json = pcall(vim.fn.json_encode, value)
-			if ok and json then
-				return prettify_json(json)
-			end
-			return vim.inspect(value, { indent = "  ", depth = depth })
+			return M.render_json(value)
 		else
 			return tostring(value or "")
 		end
@@ -149,39 +117,21 @@ function M.format_value(value, opts)
 			return tostring(value or "")
 		end
 	else
+		local rendered
 		if type(value) == "table" then
-			local count = vim.tbl_count(value)
-			if count <= 3 then
-				return vim.inspect(value, { indent = "", newline = " " })
-			else
-				return format_table_preview(value, 2) .. " [→ li]"
-			end
+			rendered = M.render_json(value)
 		elseif type(value) == "string" then
-			local is_json = false
-			local json_obj = nil
-			if value:match("^%s*{") or value:match("^%s*%[") then
-				local ok, parsed = pcall(vim.json.decode, value)
-				if ok then
-					is_json = true
-					json_obj = parsed
-				end
-			end
-
-			if is_json and type(json_obj) == "table" then
-				local count = vim.tbl_count(json_obj)
-				local json_str = vim.json.encode(json_obj)
-				if #json_str <= max_width and count <= 3 then
-					return json_str
-				else
-					return format_table_preview(json_obj, 2) .. " [→ li]"
-				end
-			elseif #value > max_width then
-				return value:sub(1, max_width - 3) .. "..."
-			end
-			return value
+			local ok, parsed = pcall(vim.json.decode, value)
+			rendered = (ok and type(parsed) == "table") and M.render_json(parsed) or value
 		else
 			return tostring(value or "")
 		end
+
+		rendered = rendered:gsub("%s+", " ")
+		if #rendered > max_width then
+			return rendered:sub(1, max_width - 3) .. "... [→ li]"
+		end
+		return rendered
 	end
 end
 
@@ -190,7 +140,7 @@ local function inline_value(value, config)
 		mode = "inline",
 		max_width = config.display.max_width
 	})
-	return (formatted:gsub("\n", " "))
+	return (formatted:gsub("%s+", " "))
 end
 
 function M.format_values_for_inline(values, config, max_values)

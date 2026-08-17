@@ -33,6 +33,34 @@ describe("Inspector Module", function()
     end)
   end)
   
+  describe("Console formatting hook", function()
+    it("should ship a readable node-console-format script", function()
+      local script = inspector.get_console_format_script()
+      assert.not_nil(script, "js/node-console-format.js should be readable")
+      assert.is_true(script:find("util.inspect", 1, true) ~= nil, "script should format via util.inspect")
+      assert.is_true(script:find("consolelog-node-format.js", 1, true) ~= nil,
+        "script needs the sourceURL used to skip its stack frames")
+    end)
+
+    it("should evaluate the script in the debuggee before the program runs", function()
+      local sent = {}
+      local original_send = inspector.send_command
+      inspector.send_command = function(_, method, params)
+        table.insert(sent, { method = method, params = params })
+        return true
+      end
+
+      local ok = inspector.install_console_formatting({ ws_id = 1 })
+
+      inspector.send_command = original_send
+
+      assert.is_true(ok, "installing the hook should succeed")
+      assert.equals(#sent, 1)
+      assert.equals(sent[1].method, "Runtime.evaluate")
+      assert.is_true(sent[1].params.expression:find("console", 1, true) ~= nil)
+    end)
+  end)
+
   describe("URL extraction", function()
     it("should extract inspector URL from debug output", function()
       local test_lines = {

@@ -6,6 +6,14 @@ local message_processor = require("consolelog.processing.message_processor_impl"
 local websocket_frame = require("consolelog.communication.websocket_frame")
 local websocket_sha1 = require("consolelog.communication.websocket_sha1")
 
+local function bytes_after_http_headers(data)
+	local _, header_end = data:find("\r\n\r\n", 1, true)
+	if not header_end then
+		return ""
+	end
+	return data:sub(header_end + 1)
+end
+
 M.server = nil
 M.port = nil
 M.clients = {}
@@ -52,6 +60,7 @@ function M.start(port)
 
 		local buffer = ""
 		local handshake_done = false
+		local fragments = {}
 
 		client:read_start(function(err, data)
 			if err then
@@ -62,7 +71,7 @@ function M.start(port)
 			if data then
 				buffer = buffer .. data
 
-				if #buffer > 1024 * 1024 then
+				if #buffer > constants.WEBSOCKET.MAX_FRAME_SIZE then
 					buffer = ""
 					M.remove_client(client)
 					return
@@ -87,16 +96,20 @@ function M.start(port)
 						    "\r\n"
 						client:write(response)
 						handshake_done = true
-						buffer = ""
+						buffer = bytes_after_http_headers(buffer)
 						debug_logger.log("WS_SERVER", "WebSocket handshake completed")
 					end
-				elseif handshake_done then
+				end
+
+				if handshake_done and #buffer > 0 then
 					debug_logger.log("WS_SERVER", "Data after handshake, buffer length: " .. #buffer)
-					local ok, parse_err = pcall(M.parse_websocket_frame, buffer, client)
-					if not ok then
-						debug_logger.log("WS_SERVER", "Parse error: " .. tostring(parse_err))
+					local ok, result = pcall(M.parse_websocket_frame, buffer, client, fragments)
+					if ok then
+						buffer = result or ""
+					else
+						debug_logger.log("WS_SERVER", "Parse error: " .. tostring(result))
+						buffer = ""
 					end
-					buffer = ""
 				end
 			else
 				M.remove_client(client)
@@ -138,28 +151,28 @@ function M.send_to_all_clients(data)
 	debug_logger.log("WS_SERVER", "Sent to all clients: " .. data.type)
 end
 
-function M.parse_websocket_frame(data, client)
+function M.parse_websocket_frame(data, client, fragments)
 	local debug_logger = require("consolelog.core.debug_logger")
 	debug_logger.log("WS_SERVER", "parse_websocket_frame called, data length: " .. #data)
 	
-	local frame, _, err = websocket_frame.extract_frame(data)
-	if err then
-		debug_logger.log("WS_SERVER", "Frame parsing error: " .. err)
-		return
+	local frames, remaining = websocket_frame.drain_messages(data, fragments)
+
+	for _, frame in ipairs(frames) do
+		if frame.opcode == websocket_frame.OPCODES.TEXT then
+			M.handle_message(frame.payload)
+		elseif frame.opcode == websocket_frame.OPCODES.PING then
+			local pong_frame = websocket_frame.create_pong_frame(frame.payload, false)
+			client:write(pong_frame)
+			debug_logger.log("WS_SERVER", "Sent pong response")
+		elseif frame.opcode == websocket_frame.OPCODES.CLOSE then
+			debug_logger.log("WS_SERVER", "Received close frame")
+		else
+			-- Ignore extension/reserved opcodes (like 0xC) - these are common in HMR scenarios
+			debug_logger.log("WS_SERVER", "Ignoring extension opcode: " .. frame.opcode)
+		end
 	end
-	
-	if frame.opcode == websocket_frame.OPCODES.TEXT then
-		M.handle_message(frame.payload)
-	elseif frame.opcode == websocket_frame.OPCODES.PING then
-		local pong_frame = websocket_frame.create_pong_frame(frame.payload, false)
-		client:write(pong_frame)
-		debug_logger.log("WS_SERVER", "Sent pong response")
-	elseif frame.opcode == websocket_frame.OPCODES.CLOSE then
-		debug_logger.log("WS_SERVER", "Received close frame")
-	else
-		-- Ignore extension/reserved opcodes (like 0xC) - these are common in HMR scenarios
-		debug_logger.log("WS_SERVER", "Ignoring extension opcode: " .. frame.opcode)
-	end
+
+	return remaining
 end
 
 function M.handle_message(payload)
@@ -301,6 +314,8 @@ function M.create_client(host, port, path)
 		path = path or "/",
 		socket = nil,
 		connected = false,
+		buffer = "",
+		fragments = {},
 		on_message = nil,
 		on_close = nil,
 		on_error = nil,
@@ -393,40 +408,42 @@ function M.handle_client_data(client_id, data)
 	
 	if not client.connected then
 		debug_logger.log("WS_CLIENT", "Handling handshake response: " .. data:sub(1, 100))
-		-- Handle handshake response
-		if data:match("HTTP/1%.1 101") then
-			debug_logger.log("WS_CLIENT", "WebSocket handshake successful!")
-			client.connected = true
-			debug_logger.log("WS_CLIENT", "Client connected status: " .. tostring(client.connected))
-			
-			-- Call on_connect callback
-			if client.on_connect then
-				client.on_connect()
-			end
-			
-			-- Process any queued messages
-			for _, msg in ipairs(client.send_queue) do
-				M.send_client_message(client_id, msg)
-			end
-			client.send_queue = {}
-		else
+		if not data:match("HTTP/1%.1 101") then
 			debug_logger.log("WS_CLIENT", "Handshake failed, response: " .. data:sub(1, 200))
-		end
-	else
-		debug_logger.log("WS_CLIENT", "Processing WebSocket frame, data size: " .. #data)
-		-- Handle WebSocket frames
-		local frame, _, err = websocket_frame.extract_frame(data)
-		if err then
-			debug_logger.log("WS_CLIENT", "Frame parsing error: " .. err)
-			if client.on_error then
-				client.on_error("Frame parsing error: " .. err)
-			end
 			return
 		end
-		
-		if frame.opcode == websocket_frame.OPCODES.TEXT and client.on_message then
+
+		debug_logger.log("WS_CLIENT", "WebSocket handshake successful!")
+		client.connected = true
+		client.buffer = bytes_after_http_headers(data)
+
+		if client.on_connect then
+			client.on_connect()
+		end
+
+		for _, msg in ipairs(client.send_queue) do
+			M.send_client_message(client_id, msg)
+		end
+		client.send_queue = {}
+	else
+		client.buffer = (client.buffer or "") .. data
+	end
+
+	if #client.buffer == 0 then
+		return
+	end
+
+	debug_logger.log("WS_CLIENT", "Processing WebSocket frames, buffered size: " .. #client.buffer)
+	client.fragments = client.fragments or {}
+	local frames, remaining = websocket_frame.drain_messages(client.buffer, client.fragments)
+	client.buffer = remaining
+
+	for _, frame in ipairs(frames) do
+		if frame.opcode == websocket_frame.OPCODES.TEXT then
 			debug_logger.log("WS_CLIENT", "Text frame received, payload size: " .. #frame.payload)
-			client.on_message(frame.payload)
+			if client.on_message then
+				client.on_message(frame.payload)
+			end
 		elseif frame.opcode == websocket_frame.OPCODES.PING then
 			debug_logger.log("WS_CLIENT", "Ping frame received, sending pong")
 			local pong_frame = websocket_frame.create_pong_frame(frame.payload, false)
@@ -434,6 +451,7 @@ function M.handle_client_data(client_id, data)
 		elseif frame.opcode == websocket_frame.OPCODES.CLOSE then
 			debug_logger.log("WS_CLIENT", "Close frame received")
 			M.close_client(client_id)
+			return
 		else
 			debug_logger.log("WS_CLIENT", "Unhandled frame opcode: " .. frame.opcode)
 		end

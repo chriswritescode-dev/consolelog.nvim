@@ -54,7 +54,7 @@ ConsoleLog automatically detects your project type and enables console capture:
 **Single-File Execution** (`:ConsoleLogRun` or `<leader>lr`):
 - **JavaScript/TypeScript**: `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts` files
   - TypeScript requires Node >= 22.6 (native from 23.6; `--experimental-strip-types` added automatically for 22.6–23.5). Node type stripping supports only erasable TypeScript syntax and does not apply `tsconfig` transforms.
-  - Runs via Node.js Inspector with console capture
+  - Runs via Node.js Inspector with console capture; values are rendered by `util.inspect` inside the process, so `Map`, `Set`, iterators and nested structures are captured at log time (Node >= 22.3)
 - **Python**: `.py` files — zero-dependency stdlib bootstrap, Python 3.8+
   - Captures `print()`, `logging` records, raw `sys.stderr` writes, and uncaught exceptions
   - Interpreter resolution: `runner.python_executable` config → `$VIRTUAL_ENV` → `.venv`/`venv` walking up from file → `python3`

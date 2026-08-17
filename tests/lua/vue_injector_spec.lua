@@ -246,7 +246,7 @@ function createApp() {
       local runtime_path, esm_path, runtime_dom_path, vite_plugin_path = create_vue_files()
 
       local marker_block = "// ConsoleLog.nvim auto-injection start\n" ..
-        "if (typeof window !== 'undefined') {\n" ..
+        "if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {\n" ..
         "  window.__CONSOLELOG_WS_PORT = 19990;\n" ..
         "  window.__CONSOLELOG_PROJECT_ID = 'test';\n" ..
         "  window.__CONSOLELOG_FRAMEWORK = 'Vue';\n" ..

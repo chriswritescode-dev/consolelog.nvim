@@ -379,4 +379,118 @@ describe("WebSocket Module", function()
       ws_server.close_client(client2.id)
     end)
   end)
+
+  describe("Frame draining", function()
+    local websocket_frame = require('consolelog.communication.websocket_frame')
+
+    local function connected_probe(received)
+      setup()
+      ws_server.ws_clients['probe'] = {
+        id = 'probe',
+        connected = true,
+        buffer = "",
+        send_queue = {},
+        socket = { write = function() end, is_closing = function() return false end, close = function() end },
+        on_message = function(payload) table.insert(received, payload) end,
+      }
+      return 'probe'
+    end
+
+    it("should deliver every frame arriving in one read", function()
+      local received = {}
+      local client_id = connected_probe(received)
+
+      local burst = websocket_frame.create_text_frame("one", false)
+          .. websocket_frame.create_text_frame("two", false)
+          .. websocket_frame.create_text_frame("three", false)
+
+      ws_server.handle_client_data(client_id, burst)
+
+      assert.equals(#received, 3, "Should deliver all three batched frames")
+      assert.equals(received[3], "three", "Should deliver the last frame payload")
+
+      ws_server.ws_clients[client_id] = nil
+    end)
+
+    it("should buffer a frame split across reads", function()
+      local received = {}
+      local client_id = connected_probe(received)
+
+      local whole = websocket_frame.create_text_frame(string.rep("x", 200), false)
+      local split_at = math.floor(#whole / 2)
+
+      ws_server.handle_client_data(client_id, whole:sub(1, split_at))
+      assert.equals(#received, 0, "Should not deliver an incomplete frame")
+
+      ws_server.handle_client_data(client_id, whole:sub(split_at + 1))
+      assert.equals(#received, 1, "Should deliver the frame once complete")
+      assert.equals(#received[1], 200, "Should reassemble the full payload")
+
+      ws_server.ws_clients[client_id] = nil
+    end)
+
+    it("should deliver frames trailing the handshake response", function()
+      setup()
+      local received = {}
+      local client = ws_server.create_client("127.0.0.1", 9229, "/test")
+      client.on_message = function(payload) table.insert(received, payload) end
+
+      local response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n"
+          .. websocket_frame.create_text_frame("first event", false)
+
+      ws_server.handle_client_data(client.id, response)
+
+      assert.is_true(client.connected, "Should complete handshake")
+      assert.equals(#received, 1, "Should deliver frame sent with the handshake response")
+      assert.equals(received[1], "first event", "Should preserve trailing frame payload")
+
+      ws_server.close_client(client.id)
+    end)
+
+    it("should reassemble a fragmented message", function()
+      local received = {}
+      local client_id = connected_probe(received)
+
+      local first = string.char(0x01, 5) .. "hello"
+      local middle = string.char(0x00, 1) .. " "
+      local last = string.char(0x80, 5) .. "world"
+
+      ws_server.handle_client_data(client_id, first)
+      assert.equals(#received, 0, "Should not deliver until the final fragment")
+
+      ws_server.handle_client_data(client_id, middle .. last)
+      assert.equals(#received, 1, "Should deliver one assembled message")
+      assert.equals(received[1], "hello world", "Should concatenate all fragments")
+
+      ws_server.ws_clients[client_id] = nil
+    end)
+
+    it("should deliver a control frame interleaved in a fragmented message", function()
+      local received = {}
+      local client_id = connected_probe(received)
+
+      local first = string.char(0x01, 4) .. "part"
+      local ping = websocket_frame.create_ping_frame("", false)
+      local last = string.char(0x80, 3) .. "ing"
+
+      ws_server.handle_client_data(client_id, first .. ping .. last)
+
+      assert.equals(#received, 1, "Should deliver the assembled message")
+      assert.equals(received[1], "parting", "Should not let the ping corrupt reassembly")
+
+      ws_server.ws_clients[client_id] = nil
+    end)
+
+    it("should return unconsumed bytes from parse_websocket_frame", function()
+      setup()
+      local mock_client = { write = function() end, close = function() end }
+
+      local complete = websocket_frame.create_text_frame(vim.json.encode({ type = "ping", timestamp = 1 }), false)
+      local partial = websocket_frame.create_text_frame("incomplete payload", false):sub(1, 6)
+
+      local remaining = ws_server.parse_websocket_frame(complete .. partial, mock_client)
+
+      assert.equals(remaining, partial, "Should return the incomplete tail for the next read")
+    end)
+  end)
 end)

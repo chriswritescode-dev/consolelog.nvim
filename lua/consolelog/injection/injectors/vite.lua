@@ -143,7 +143,7 @@ function M.patch(project_root, ws_port)
   end
   
   local inject_script = string.format([[
-if (typeof window !== 'undefined') {
+%s
   window.__CONSOLELOG_WS_PORT = %d;
   window.__CONSOLELOG_PROJECT_ID = '%s';
   window.__CONSOLELOG_FRAMEWORK = '%s';
@@ -151,7 +151,7 @@ if (typeof window !== 'undefined') {
   %s
   %s
 }
-]], ws_port, project_id, framework, sourcemap_content, inject_content)
+]], constants.INJECTION.BROWSER_GUARD, ws_port, project_id, framework, sourcemap_content, inject_content)
 
   local search_roots = find_search_roots(project_root)
   local patched_count = 0

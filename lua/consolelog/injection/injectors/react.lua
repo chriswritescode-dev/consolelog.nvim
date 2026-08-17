@@ -35,6 +35,7 @@ function M.detect(project_root)
   if vim.fn.filereadable(package_json) == 1 then
     local content = table.concat(vim.fn.readfile(package_json), "\n")
     return content:match('"react"') ~= nil and 
+           not content:match('"react%-native"') and
            not content:match('"next"') and 
            not content:match('"vite"') and 
            not content:match('"@vitejs"')
@@ -103,7 +104,7 @@ function M.patch(project_root, ws_port)
   end
 
   local inject_script = constants.INJECTION.START_MARKER .. "\n" .. string.format([[
-if (typeof window !== 'undefined') {
+%s
   window.__CONSOLELOG_WS_PORT = %d;
   window.__CONSOLELOG_PROJECT_ID = '%s';
   window.__CONSOLELOG_FRAMEWORK = 'React';
@@ -111,7 +112,7 @@ if (typeof window !== 'undefined') {
   %s
   %s
 }
-]], ws_port, project_id, sourcemap_content, inject_content) .. constants.INJECTION.END_MARKER
+]], constants.INJECTION.BROWSER_GUARD, ws_port, project_id, sourcemap_content, inject_content) .. constants.INJECTION.END_MARKER
 
   for _, file in ipairs(REACT_FILES) do
     local found_file = false
