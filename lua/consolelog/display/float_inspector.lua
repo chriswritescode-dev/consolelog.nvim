@@ -311,6 +311,40 @@ function M.open_inspector_with_history(outputs, bufnr, line, use_split)
 	return win, buf
 end
 
+function M.build_output_lines(output, config)
+	local utils = require("consolelog.core.utils")
+	config = config or require("consolelog").config
+
+	local entries = utils.ordered_output_entries(output, config)
+	local numbered = #entries > 1
+	local lines = {}
+
+	for i, entry in ipairs(entries) do
+		local prefix = numbered and string.format("[%d] ", i) or ""
+		local continuation = string.rep(" ", #prefix)
+		local content = entry.raw_value or entry.value
+
+		local ok, formatted = pcall(formatter.format_for_inspector, content)
+		if not ok then
+			formatted = tostring(content or "[nil]")
+		elseif formatted == nil or formatted == "" then
+			formatted = "[Empty]"
+		end
+
+		local is_first = true
+		for content_line in tostring(formatted):gmatch("[^\n]+") do
+			table.insert(lines, "  " .. (is_first and prefix or continuation) .. content_line)
+			is_first = false
+		end
+
+		if is_first then
+			table.insert(lines, "  " .. prefix .. "[Empty]")
+		end
+	end
+
+	return lines
+end
+
 -- Inspect all outputs across ALL buffers
 function M.inspect_all(all_outputs, all_unmatched_outputs)
 	local success, err = pcall(function()
@@ -444,61 +478,15 @@ function M.inspect_all(all_outputs, all_unmatched_outputs)
 				current_line = current_line + 1
 			end
 
-			-- Use raw_value if available for better formatting
-			local content = output.raw_value or output.value
-
-			local ok, formatted = pcall(formatter.format_for_inspector, content)
-			if ok then
-				-- Split formatted content by newlines since nvim_buf_set_lines doesn't accept newlines
-				if formatted and formatted ~= "" then
-					-- Handle both single-line and multi-line content
-					if formatted:find("\n") then
-						for line in formatted:gmatch("[^\n]+") do
-							table.insert(lines, "  " .. line)
-							line_map[current_line] = {
-								bufnr = output.bufnr,
-								line = output.line,
-								type = "content"
-							}
-							current_line = current_line + 1
-						end
-					else
-						table.insert(lines, "  " .. formatted)
-						line_map[current_line] = {
-							bufnr = output.bufnr,
-							line = output.line,
-							type = "content"
-						}
-						current_line = current_line + 1
-					end
-				else
-					table.insert(lines, "  [Empty]")
-					current_line = current_line + 1
-				end
-			else
-				debug_logger.log("INSPECT_ALL_ERROR", "Failed to format value: " .. tostring(formatted))
-				-- Also split the raw content if it has newlines
-				local content_str = tostring(content or "[nil]")
-				if content_str:find("\n") then
-					for line in content_str:gmatch("[^\n]+") do
-						table.insert(lines, "  " .. line)
-						line_map[current_line] = {
-							bufnr = output.bufnr,
-							line = output.line,
-							type = "content"
-						}
-						current_line = current_line + 1
-					end
-				else
-					table.insert(lines, "  " .. content_str)
-					line_map[current_line] = {
-						bufnr = output.bufnr,
-						line = output.line,
-						type = "content"
-					}
-					current_line = current_line + 1
-				end
+			for _, content_line in ipairs(M.build_output_lines(output)) do
+				table.insert(lines, content_line)
+				line_map[#lines] = {
+					bufnr = output.bufnr,
+					line = output.line,
+					type = "content"
+				}
 			end
+			current_line = #lines + 1
 
 			table.insert(lines, "")
 			current_line = current_line + 1
@@ -745,55 +733,15 @@ function M.inspect_buffer(buffer_outputs, buffer_unmatched_outputs)
 				current_line = current_line + 1
 			end
 
-			local content = output.raw_value or output.value
-			local ok, formatted = pcall(formatter.format_for_inspector, content)
-			if ok then
-				if formatted and formatted ~= "" then
-					if formatted:find("\n") then
-						for line in formatted:gmatch("[^\n]+") do
-							table.insert(lines, "  " .. line)
-							line_map[current_line] = {
-								bufnr = output.bufnr,
-								line = output.line,
-								type = "content"
-							}
-							current_line = current_line + 1
-						end
-					else
-						table.insert(lines, "  " .. formatted)
-						line_map[current_line] = {
-							bufnr = output.bufnr,
-							line = output.line,
-							type = "content"
-						}
-						current_line = current_line + 1
-					end
-				else
-					table.insert(lines, "  [Empty]")
-					current_line = current_line + 1
-				end
-			else
-				local content_str = tostring(content or "[nil]")
-				if content_str:find("\n") then
-					for line in content_str:gmatch("[^\n]+") do
-						table.insert(lines, "  " .. line)
-						line_map[current_line] = {
-							bufnr = output.bufnr,
-							line = output.line,
-							type = "content"
-						}
-						current_line = current_line + 1
-					end
-				else
-					table.insert(lines, "  " .. content_str)
-					line_map[current_line] = {
-						bufnr = output.bufnr,
-						line = output.line,
-						type = "content"
-					}
-					current_line = current_line + 1
-				end
+			for _, content_line in ipairs(M.build_output_lines(output)) do
+				table.insert(lines, content_line)
+				line_map[#lines] = {
+					bufnr = output.bufnr,
+					line = output.line,
+					type = "content"
+				}
 			end
+			current_line = #lines + 1
 
 			table.insert(lines, "")
 			current_line = current_line + 1

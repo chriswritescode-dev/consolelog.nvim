@@ -6,6 +6,7 @@ local it = helper.it
 package.path = package.path .. ";./lua/?.lua"
 local display = require('consolelog.display.display')
 local vtext_builder = require('consolelog.display.virtual_text_builder')
+local float_inspector = require('consolelog.display.float_inspector')
 local parser = require('consolelog.processing.parser')
 local formatter = require('consolelog.processing.formatter')
 local constants = require('consolelog.core.constants')
@@ -381,6 +382,57 @@ describe("Display Module", function()
 
       assert.is_true(text:find("1, 2, 3, 4, 5", 1, true) ~= nil, "Should show the first values in order")
       assert.is_true(text:find("...", 1, true) ~= nil, "Should mark truncated values")
+    end)
+
+    it("should render every recorded value in the inspector windows", function()
+      setup()
+      consolelog_mock.config.history.enabled = true
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      display.update_output(test_bufnr, 1, "7", "log")
+      display.update_output(test_bufnr, 1, "2", "log")
+      display.apply_pending_updates(test_bufnr)
+
+      local rendered = float_inspector.build_output_lines(
+        consolelog_mock.outputs[test_bufnr][1], consolelog_mock.config)
+
+      assert.equals(#rendered, 2, "Should render one entry per recorded value")
+      assert.is_true(rendered[1]:find("[1] 7", 1, true) ~= nil, "Oldest value should be listed first")
+      assert.is_true(rendered[2]:find("[2] 2", 1, true) ~= nil, "Newest value should be listed last")
+    end)
+
+    it("should render an unnumbered single value when history is disabled", function()
+      setup()
+      consolelog_mock.config.history.enabled = false
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      display.update_output(test_bufnr, 1, "7", "log")
+      display.update_output(test_bufnr, 1, "2", "log")
+      display.apply_pending_updates(test_bufnr)
+
+      local rendered = float_inspector.build_output_lines(
+        consolelog_mock.outputs[test_bufnr][1], consolelog_mock.config)
+
+      assert.equals(#rendered, 1, "Should render only the latest value")
+      assert.is_true(rendered[1]:find("[1]", 1, true) == nil, "Should not number a lone value")
+      assert.is_true(rendered[1]:find("2", 1, true) ~= nil, "Should show the latest value")
+    end)
+
+    it("should indent continuation lines under the entry number", function()
+      setup()
+      consolelog_mock.config.history.enabled = true
+      consolelog_mock.outputs[test_bufnr] = {}
+
+      display.update_output(test_bufnr, 1, "first", "log", "line one\nline two")
+      display.update_output(test_bufnr, 1, "second", "log")
+      display.apply_pending_updates(test_bufnr)
+
+      local rendered = float_inspector.build_output_lines(
+        consolelog_mock.outputs[test_bufnr][1], consolelog_mock.config)
+
+      assert.equals(#rendered, 3, "Multiline entries should keep every line")
+      assert.is_true(rendered[1]:find("[1] line one", 1, true) ~= nil, "First line carries the number")
+      assert.is_true(rendered[2]:find("      line two", 1, true) ~= nil, "Continuation aligns under the value")
     end)
 
     it("should show only the latest value when history is disabled", function()

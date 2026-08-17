@@ -79,6 +79,22 @@ function M.find_regular_buffer_window(bufnr, winid)
 	return nil
 end
 
+function M.ordered_output_entries(output, config)
+	local history = output.history
+
+	if not config or not config.history or not config.history.enabled
+		or not history or #history == 0 then
+		return { output }
+	end
+
+	local entries = {}
+	for i = #history, 1, -1 do
+		table.insert(entries, history[i])
+	end
+
+	return entries
+end
+
 function M.strip_ansi(text)
 	if not text or type(text) ~= "string" then
 		return text

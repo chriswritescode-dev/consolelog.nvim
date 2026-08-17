@@ -2,6 +2,7 @@ local M = {}
 
 local formatter = require("consolelog.processing.formatter")
 local constants = require("consolelog.core.constants")
+local utils = require("consolelog.core.utils")
 
 function M.get_highlight_groups(console_type)
   local highlight_map = {
@@ -40,15 +41,9 @@ function M.collect_inline_values(output, config)
   -- full representation (parsed table or multiline exception stack) that the
   -- float inspector should show; forcing it inline would flatten exception
   -- stacks into a single display line.
-  local history = output.history
-
-  if not config.history or not config.history.enabled or not history or #history == 0 then
-    return { output.value }
-  end
-
   local values = {}
-  for i = #history, 1, -1 do
-    table.insert(values, history[i].value)
+  for _, entry in ipairs(utils.ordered_output_entries(output, config)) do
+    table.insert(values, entry.value)
   end
 
   return values
