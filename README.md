@@ -169,7 +169,7 @@ The plugin works out of the box with sensible defaults. Here's the full configur
         extra_body = nil,        -- Extra fields merged into the request body, e.g. { chat_template_kwargs = { thinking = false } } for vLLM
         max_lines = 50,          -- Lines per request; longer ranges are split into sequential chunks
         max_context_lines = 1000, -- Whole file rides along as context up to this many lines; larger files send only the lines above the chunk
-        prefix = " ⟩ ",          -- Prefix before each explanation
+        prefix = "",              -- Prefix before each explanation
         max_width = 80,          -- Wrap explanations wider than this into virtual lines below the code
       },
       keymaps = {
@@ -228,9 +228,11 @@ The plugin works out of the box with sensible defaults. Here's the full configur
 ```
 
 
-### Code Explanations
+## Code Explanations
 
-`:ConsoleLogExplain` sends the selected lines (or the whole buffer) to an LLM and renders a short, behavior-focused explanation of each line as virtual text. The API key is read from an environment variable — `OPENAI_API_KEY` for OpenAI, `ANTHROPIC_API_KEY` for Anthropic — and `curl` must be installed. Explanations work in any regular buffer, unlike runtime console capture which is JavaScript/TypeScript/Python only.
+![Line-by-line LLM explanations rendered inline as virtual text](assets/explain-demo.png)
+
+`:ConsoleLogExplain` sends the selected lines (or the whole buffer) to an LLM and renders a short, behavior-focused explanation of each line (at most 12 words) as virtual text. The API key is read from an environment variable — `OPENAI_API_KEY` for OpenAI, `ANTHROPIC_API_KEY` for Anthropic — and `curl` must be installed. Explanations work in any regular buffer, unlike runtime console capture which is JavaScript/TypeScript/Python only.
 
 **Local / self-hosted models:** point the `openai` provider at any OpenAI-compatible endpoint — for example [Ollama](https://ollama.com):
 ```lua
@@ -253,7 +255,7 @@ explain = {
 - Explanations work in any regular buffer regardless of filetype; if you lazy-load the plugin, make sure the explain commands/keys are in your `cmd`/`keys` triggers.
 - A response arriving after the buffer changed mid-request is discarded with a warning; remaining chunks are aborted.
 - `max_tokens` (default 32768) leaves headroom for reasoning models that spend tokens thinking before answering; a truncated response reports "stopped at max_tokens" instead of failing silently. `temperature` is only sent when explicitly set to a number — by default the server/model generation defaults apply.
-- Each request sends the whole file as context (numbered, with an instruction bounding the explained lines) so explanations understand imports and enclosing scopes. Files longer than `max_context_lines` (default 1000) send only the lines above the chunk instead. The fixed file prefix plays well with server-side prefix caching (e.g. vLLM).
+- Each request sends the file as numbered context (with an instruction bounding the lines to explain) so explanations understand imports and enclosing scopes. When the file is longer than `max_context_lines` (default 1000), only a window of that many lines ending at the chunk's last line is sent instead. When the whole file fits, every request carries the identical file prefix, which plays well with server-side prefix caching (e.g. vLLM).
 - A chunk with nothing worth explaining (all comments or docstrings) is a valid empty answer, not an error — this also keeps reasoning models from spiraling on doc-heavy chunks.
 - `extra_body` merges arbitrary fields into the request body for server-specific options, e.g. `{ chat_template_kwargs = { thinking = false } }` to disable the thinking channel on vLLM.
 
