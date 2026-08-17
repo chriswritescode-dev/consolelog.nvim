@@ -84,10 +84,12 @@ M.config = {
 		model = "gpt-4o-mini",
 		url = nil,
 		api_key_env = nil,
-		temperature = 0,
-		max_tokens = 2048,
+		temperature = nil,
+		max_tokens = 32768,
+		extra_body = nil,
 		timeout_ms = constants.EXPLAIN.DEFAULT_TIMEOUT_MS,
 		max_lines = constants.EXPLAIN.DEFAULT_MAX_LINES,
+		max_context_lines = constants.EXPLAIN.DEFAULT_MAX_CONTEXT_LINES,
 		prefix = constants.EXPLAIN.DEFAULT_PREFIX,
 		max_width = 80,
 	},
@@ -104,6 +106,7 @@ M.config = {
 		explain = "<leader>le",
 		explain_clear = "<leader>lE",
 		explain_toggle = "<leader>lv",
+		explain_inspect = "<leader>lI",
 	},
 }
 

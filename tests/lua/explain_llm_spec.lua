@@ -57,7 +57,7 @@ describe("Explain LLM request builder", function()
     assert.is_true(has_header(request.cmd, "Content-Type: application/json"))
     assert.is_true(vim.tbl_contains(request.cmd, "--data-binary"))
     assert.is_true(vim.tbl_contains(request.cmd, "@-"))
-    assert.equals("60", max_time(request.cmd))
+    assert.equals("120", max_time(request.cmd))
     teardown()
   end)
 
@@ -79,17 +79,41 @@ describe("Explain LLM request builder", function()
     teardown()
   end)
 
-  it("omits temperature when cfg.temperature is false", function()
+  it("omits temperature unless explicitly set to a number", function()
+    setup()
+    fake_env["OPENAI_API_KEY"] = "test-key"
+    local unset = llm.build_request({
+      provider = "openai",
+      model = "gpt-4o-mini",
+      max_tokens = 300,
+    }, "explain this line")
+    assert.is_nil(vim.json.decode(unset.body).temperature, "no temperature key means the server default applies")
+
+    local disabled = llm.build_request({
+      provider = "openai",
+      model = "gpt-4o-mini",
+      max_tokens = 300,
+      temperature = false,
+    }, "explain this line")
+    assert.is_nil(vim.json.decode(disabled.body).temperature)
+    teardown()
+  end)
+
+  it("merges cfg.extra_body fields into the request body", function()
     setup()
     fake_env["OPENAI_API_KEY"] = "test-key"
     local request = llm.build_request({
       provider = "openai",
       model = "gpt-4o-mini",
       max_tokens = 300,
-      temperature = false,
+      temperature = 0.6,
+      extra_body = { chat_template_kwargs = { thinking = false } },
     }, "explain this line")
     local decoded = vim.json.decode(request.body)
-    assert.is_nil(decoded.temperature)
+    assert.not_nil(decoded.chat_template_kwargs, "extra body fields reach the payload")
+    assert.is_false(decoded.chat_template_kwargs.thinking)
+    assert.equals("gpt-4o-mini", decoded.model, "standard fields are untouched")
+    assert.equals(0.6, decoded.temperature)
     teardown()
   end)
 
@@ -275,6 +299,35 @@ describe("Explain response handling", function()
     assert.is_nil(content)
     assert.is_true(type(err) == "string" and err:find("openai") ~= nil, "error should mention the provider")
     assert.is_true(type(err) == "string" and err:find("unexpected response shape") ~= nil, "error should describe the shape failure")
+  end)
+
+  it("reports max_tokens truncation when openai returns empty content with finish_reason length", function()
+    local content, err = llm.extract_content("openai",
+      '{"choices":[{"finish_reason":"length","message":{"reasoning_content":"thinking","content":""}}]}')
+    assert.is_nil(content)
+    assert.is_true(type(err) == "string" and err:find("max_tokens") ~= nil, "error should point at max_tokens")
+  end)
+
+  it("treats null content with finish_reason length as max_tokens truncation", function()
+    local content, err = llm.extract_content("openai",
+      '{"choices":[{"finish_reason":"length","message":{"reasoning_content":"thinking","content":null}}]}')
+    assert.is_nil(content)
+    assert.is_true(type(err) == "string" and err:find("max_tokens") ~= nil, "null content plus length finish should point at max_tokens")
+  end)
+
+  it("carries the finish reason for empty content that did not hit max_tokens", function()
+    local content, err = llm.extract_content("openai",
+      '{"choices":[{"finish_reason":"stop","message":{"content":""}}]}')
+    assert.is_nil(content)
+    assert.is_true(type(err) == "string" and err:find("empty content") ~= nil, "error should describe empty content")
+    assert.is_true(type(err) == "string" and err:find("stop") ~= nil, "error should carry the finish reason")
+  end)
+
+  it("reports anthropic max_tokens stop reason for empty content", function()
+    local content, err = llm.extract_content("anthropic",
+      '{"stop_reason":"max_tokens","content":[{"type":"text","text":""}]}')
+    assert.is_nil(content)
+    assert.is_true(type(err) == "string" and err:find("max_tokens") ~= nil, "error should point at max_tokens")
   end)
 
   it("returns a decode error for non-JSON responses", function()

@@ -48,6 +48,10 @@ function M.setup()
 		require("consolelog.explain").clear(vim.api.nvim_get_current_buf())
 	end, { desc = "Clear inline code explanations" })
 
+	vim.api.nvim_create_user_command("ConsoleLogExplainInspect", function()
+		require("consolelog.explain").inspect(vim.api.nvim_get_current_buf())
+	end, { desc = "Show the full explanation for the current line in a float" })
+
 	vim.api.nvim_create_user_command("ConsoleLogExplainToggle", function()
 		require("consolelog.explain").toggle(vim.api.nvim_get_current_buf())
 	end, { desc = "Toggle visibility of inline code explanations" })

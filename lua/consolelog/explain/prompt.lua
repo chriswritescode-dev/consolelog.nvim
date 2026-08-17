@@ -2,7 +2,7 @@ local constants = require("consolelog.core.constants")
 
 local M = {}
 
-function M.build(source_lines, start_line, filetype)
+function M.build(source_lines, start_line, explain_start, explain_end, filetype)
 	if not source_lines or #source_lines == 0 then
 		return nil
 	end
@@ -22,6 +22,7 @@ function M.build(source_lines, start_line, filetype)
 		"- No trailing period.",
 		"- Describe behavior/intent, not syntax names.",
 		"- Skip blank lines, comment-only lines and lines that are only closing brackets.",
+		'- If no line needs an explanation, reply {"explanations":[]}',
 		"",
 		"Source:",
 	}
@@ -29,6 +30,9 @@ function M.build(source_lines, start_line, filetype)
 	for i, source_line in ipairs(source_lines) do
 		table.insert(lines, string.format("%d: %s", start_line + i - 1, source_line))
 	end
+
+	table.insert(lines, "")
+	table.insert(lines, string.format("Explain only lines %d-%d. The rest of the source is context.", explain_start, explain_end))
 
 	return table.concat(lines, "\n")
 end
@@ -90,7 +94,7 @@ function M.parse(content, min_line, max_line)
 	end
 
 	if #annotations == 0 then
-		return nil, "model returned no usable line explanations"
+		return annotations, nil
 	end
 
 	table.sort(annotations, function(a, b) return a.line < b.line end)

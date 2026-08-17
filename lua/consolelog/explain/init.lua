@@ -8,6 +8,97 @@ M.namespace = vim.api.nvim_create_namespace("consolelog_explain")
 M.pending = {}
 M.annotations = {}
 M.hidden = {}
+M.loading = {}
+
+local SPINNER_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+local SPINNER_INTERVAL_MS = 100
+
+local function toast_opts(bufnr, loading)
+	return {
+		id = "consolelog_explain_" .. bufnr,
+		title = "ConsoleLog",
+		replace = loading and loading.notif or nil,
+		timeout = false,
+		hide_from_history = true,
+	}
+end
+
+local function notify_toast(msg, level, opts)
+	local ok, result = pcall(vim.notify, msg, level, opts)
+	if ok then
+		return result
+	end
+	if opts and opts.replace ~= nil then
+		opts.replace = nil
+		local retry_ok, retry_result = pcall(vim.notify, msg, level, opts)
+		if retry_ok then
+			return retry_result
+		end
+	end
+	return nil
+end
+
+local function spin(bufnr)
+	local loading = M.loading[bufnr]
+	if not loading then
+		return
+	end
+	local frame = SPINNER_FRAMES[loading.frame]
+	loading.frame = loading.frame % #SPINNER_FRAMES + 1
+	loading.notif = notify_toast(frame .. " " .. loading.msg, vim.log.levels.INFO, toast_opts(bufnr, loading))
+end
+
+local function hide_loading(bufnr)
+	local loading = M.loading[bufnr]
+	M.loading[bufnr] = nil
+	if not loading then
+		return nil
+	end
+	if loading.timer then
+		loading.timer:stop()
+		if not loading.timer:is_closing() then
+			loading.timer:close()
+		end
+	end
+	return loading
+end
+
+local function stop_loading(bufnr, msg, level)
+	local loading = hide_loading(bufnr)
+	local opts = toast_opts(bufnr, loading)
+	opts.timeout = nil
+	notify_toast(msg, level, opts)
+end
+
+local function show_loading(bufnr, state)
+	local chunk = state.chunks[state.index]
+	local msg
+	if #state.chunks == 1 then
+		local requested = chunk.e - chunk.s + 1
+		msg = string.format("Explaining %d line%s", requested, requested == 1 and "" or "s")
+	else
+		msg = string.format("Explaining lines %d-%d (%d/%d)", chunk.s, chunk.e, state.index, #state.chunks)
+	end
+
+	local loading = M.loading[bufnr]
+	if loading then
+		loading.msg = msg
+		return
+	end
+
+	loading = { frame = 1, msg = msg }
+	M.loading[bufnr] = loading
+	spin(bufnr)
+
+	local uv = vim.uv or vim.loop
+	local timer = uv.new_timer()
+	if timer then
+		loading.timer = timer
+		timer:start(SPINNER_INTERVAL_MS, SPINNER_INTERVAL_MS, vim.schedule_wrap(function()
+			spin(bufnr)
+		end))
+	end
+end
 
 function M.sync_lines(bufnr)
 	if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -71,11 +162,12 @@ function M.clear(bufnr, start_line, end_line)
 end
 
 function M.cancel(bufnr)
-	local job_id = M.pending[bufnr]
-	if job_id then
-		vim.fn.jobstop(job_id)
-		M.pending[bufnr] = nil
+	local state = M.pending[bufnr]
+	if state and state.job_id then
+		vim.fn.jobstop(state.job_id)
 	end
+	M.pending[bufnr] = nil
+	hide_loading(bufnr)
 end
 
 local function render_entry(bufnr, entry, line_count, config)
@@ -150,6 +242,174 @@ function M.toggle(bufnr)
 	end
 end
 
+function M.chunk_ranges(start_line, end_line, size, anchor)
+	if type(size) ~= "number" or size < 1 then
+		size = constants.EXPLAIN.DEFAULT_MAX_LINES
+	end
+	if type(anchor) ~= "number" or anchor <= start_line or anchor > end_line then
+		anchor = start_line
+	end
+	local chunks = {}
+	local s = anchor
+	while s <= end_line do
+		table.insert(chunks, { s = s, e = math.min(s + size - 1, end_line) })
+		s = chunks[#chunks].e + 1
+	end
+	s = start_line
+	while s < anchor do
+		table.insert(chunks, { s = s, e = math.min(s + size - 1, anchor - 1) })
+		s = chunks[#chunks].e + 1
+	end
+	return chunks
+end
+
+local function cursor_line_in(bufnr)
+	local win = vim.api.nvim_get_current_win()
+	if vim.api.nvim_win_get_buf(win) ~= bufnr then
+		return nil
+	end
+	return vim.api.nvim_win_get_cursor(win)[1]
+end
+
+local run_chunk
+run_chunk = function(bufnr, state)
+	local chunk = state.chunks[state.index]
+	if not chunk then
+		M.pending[bufnr] = nil
+		stop_loading(bufnr, string.format("Explained %d lines", state.rendered), vim.log.levels.INFO)
+		return
+	end
+
+	local lines = vim.api.nvim_buf_get_lines(bufnr, chunk.s - 1, chunk.e, false)
+	local has_code = false
+	for _, line in ipairs(lines) do
+		if not line:match("^%s*$") then
+			has_code = true
+			break
+		end
+	end
+	if not has_code then
+		state.index = state.index + 1
+		return run_chunk(bufnr, state)
+	end
+
+	show_loading(bufnr, state)
+
+	local buffer_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	local total = #buffer_lines
+	local limit = state.cfg.max_context_lines or constants.EXPLAIN.DEFAULT_MAX_CONTEXT_LINES
+	local ctx_s, ctx_e = 1, total
+	if total > limit then
+		ctx_e = chunk.e
+		ctx_s = math.min(chunk.s, math.max(1, chunk.e - limit + 1))
+	end
+	local context = {}
+	for i = ctx_s, ctx_e do
+		table.insert(context, buffer_lines[i])
+	end
+
+	local prompt = require("consolelog.explain.prompt")
+	local prompt_text = prompt.build(context, ctx_s, chunk.s, chunk.e, vim.bo[bufnr].filetype)
+
+	local on_done = function(content, err)
+		if M.pending[bufnr] ~= state then
+			return
+		end
+		if err then
+			M.pending[bufnr] = nil
+			stop_loading(bufnr, "ConsoleLog explain: " .. err, vim.log.levels.ERROR)
+			return
+		end
+		if not vim.api.nvim_buf_is_valid(bufnr) then
+			M.pending[bufnr] = nil
+			stop_loading(bufnr, "Explain aborted: buffer is gone", vim.log.levels.WARN)
+			return
+		end
+		if vim.api.nvim_buf_get_changedtick(bufnr) ~= state.tick then
+			M.pending[bufnr] = nil
+			stop_loading(bufnr, "Buffer changed while explaining; run :ConsoleLogExplain again", vim.log.levels.WARN)
+			return
+		end
+		local annotations, parse_err = prompt.parse(content, chunk.s, chunk.e)
+		if not annotations then
+			M.pending[bufnr] = nil
+			stop_loading(bufnr, "ConsoleLog explain: " .. parse_err, vim.log.levels.ERROR)
+			return
+		end
+		if M.hidden[bufnr] then
+			M.hidden[bufnr] = nil
+			M.restore(bufnr)
+		end
+		state.rendered = state.rendered + M.render_annotations(bufnr, chunk.s, chunk.e, annotations)
+		state.index = state.index + 1
+		run_chunk(bufnr, state)
+	end
+
+	local llm = require("consolelog.explain.llm")
+	state.job_id = llm.request(state.cfg, prompt_text, on_done)
+end
+
+function M.inspect(bufnr)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		vim.notify("No explanation on this line", vim.log.levels.INFO)
+		return nil
+	end
+
+	M.sync_lines(bufnr)
+
+	local line = vim.api.nvim_win_get_cursor(0)[1]
+	local entry
+	for _, candidate in ipairs(M.annotations[bufnr] or {}) do
+		if candidate.line == line then
+			entry = candidate
+			break
+		end
+	end
+	if not entry then
+		vim.notify("No explanation on this line", vim.log.levels.INFO)
+		return nil
+	end
+
+	local max_width = math.min(80, vim.o.columns - 4)
+	local lines = vtext_builder.split_into_lines(entry.text, max_width)
+	local width = 1
+	for _, text_line in ipairs(lines) do
+		width = math.max(width, vim.fn.strdisplaywidth(text_line))
+	end
+	width = math.min(width + 2, max_width + 2)
+	local height = math.min(#lines, math.max(1, vim.o.lines - 4))
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	vim.bo[buf].bufhidden = "wipe"
+	vim.bo[buf].modifiable = false
+
+	local win = vim.api.nvim_open_win(buf, true, {
+		relative = "cursor",
+		width = width,
+		height = height,
+		row = 1,
+		col = 0,
+		style = "minimal",
+		border = "rounded",
+		title = string.format(" Explanation - line %d ", line),
+		title_pos = "center",
+	})
+	vim.wo[win].wrap = true
+
+	local function close_window()
+		if vim.api.nvim_win_is_valid(win) then
+			vim.api.nvim_win_close(win, true)
+		end
+	end
+	vim.keymap.set("n", "q", close_window, { buffer = buf, nowait = true })
+	vim.keymap.set("n", "<Esc>", close_window, { buffer = buf, nowait = true })
+
+	return win
+end
+
 function M.explain_range(bufnr, start_line, end_line)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -166,17 +426,6 @@ function M.explain_range(bufnr, start_line, end_line)
 	start_line = math.max(1, math.min(start_line, line_count))
 	end_line = math.max(1, math.min(end_line, line_count))
 
-	local cfg = require("consolelog").config.explain or {}
-	local limit = cfg.max_lines or constants.EXPLAIN.DEFAULT_MAX_LINES
-	local requested = end_line - start_line + 1
-	if requested > limit then
-		vim.notify(
-			string.format(":ConsoleLogExplain range is %d lines, maximum is %d", requested, limit),
-			vim.log.levels.ERROR
-		)
-		return nil
-	end
-
 	local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
 	local all_blank = true
 	for _, line in ipairs(lines) do
@@ -192,43 +441,22 @@ function M.explain_range(bufnr, start_line, end_line)
 
 	M.cancel(bufnr)
 
-	local prompt = require("consolelog.explain.prompt")
-	local prompt_text = prompt.build(lines, start_line, vim.bo[bufnr].filetype)
-	local tick = vim.api.nvim_buf_get_changedtick(bufnr)
-
-	local job_id
-	local on_done = function(content, err)
-		if M.pending[bufnr] == job_id then
-			M.pending[bufnr] = nil
-		end
-		if err then
-			vim.notify("ConsoleLog explain: " .. err, vim.log.levels.ERROR)
-			return
-		end
-		if not vim.api.nvim_buf_is_valid(bufnr) then
-			return
-		end
-		if vim.api.nvim_buf_get_changedtick(bufnr) ~= tick then
-			vim.notify("Buffer changed while explaining; run :ConsoleLogExplain again", vim.log.levels.WARN)
-			return
-		end
-		local annotations, parse_err = prompt.parse(content, start_line, end_line)
-		if not annotations then
-			vim.notify("ConsoleLog explain: " .. parse_err, vim.log.levels.ERROR)
-			return
-		end
-		if M.hidden[bufnr] then
-			M.hidden[bufnr] = nil
-			M.restore(bufnr)
-		end
-		local rendered = M.render_annotations(bufnr, start_line, end_line, annotations)
-		vim.notify(string.format("Explained %d lines", rendered), vim.log.levels.INFO)
-	end
-
-	local llm = require("consolelog.explain.llm")
-	job_id = llm.request(cfg, prompt_text, on_done)
-	M.pending[bufnr] = job_id
-	return job_id
+	local cfg = require("consolelog").config.explain or {}
+	local state = {
+		cfg = cfg,
+		tick = vim.api.nvim_buf_get_changedtick(bufnr),
+		chunks = M.chunk_ranges(
+			start_line,
+			end_line,
+			cfg.max_lines or constants.EXPLAIN.DEFAULT_MAX_LINES,
+			cursor_line_in(bufnr)
+		),
+		index = 1,
+		rendered = 0,
+	}
+	M.pending[bufnr] = state
+	run_chunk(bufnr, state)
+	return state
 end
 
 function M.render_annotations(bufnr, start_line, end_line, annotations)

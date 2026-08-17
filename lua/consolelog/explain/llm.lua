@@ -8,8 +8,13 @@ local function build_body(cfg, prompt)
 		messages = { { role = "user", content = prompt } },
 		max_tokens = cfg.max_tokens,
 	}
-	if cfg.temperature ~= false then
+	if type(cfg.temperature) == "number" then
 		body.temperature = cfg.temperature
+	end
+	if type(cfg.extra_body) == "table" then
+		for key, value in pairs(cfg.extra_body) do
+			body[key] = value
+		end
 	end
 	return body
 end
@@ -30,7 +35,21 @@ M.providers = {
 			if type(choice) ~= "table" or type(choice.message) ~= "table" then
 				return nil
 			end
-			return choice.message.content
+			local content = choice.message.content
+			if type(content) ~= "string" then
+				return ""
+			end
+			return content
+		end,
+		finish_reason = function(decoded)
+			if type(decoded) ~= "table" or type(decoded.choices) ~= "table" then
+				return nil
+			end
+			local choice = decoded.choices[1]
+			if type(choice) ~= "table" then
+				return nil
+			end
+			return choice.finish_reason
 		end,
 	},
 	anthropic = {
@@ -56,6 +75,12 @@ M.providers = {
 				end
 			end
 			return fallback
+		end,
+		finish_reason = function(decoded)
+			if type(decoded) ~= "table" then
+				return nil
+			end
+			return decoded.stop_reason
 		end,
 	},
 }
@@ -123,6 +148,16 @@ function M.extract_content(provider_name, body)
 	local content = provider.extract_content(decoded)
 	if type(content) ~= "string" then
 		return nil, string.format("unexpected response shape from %s", provider_name)
+	end
+	if content == "" then
+		local reason = provider.finish_reason and provider.finish_reason(decoded)
+		if type(reason) ~= "string" then
+			reason = nil
+		end
+		if reason == "length" or reason == "max_tokens" then
+			return nil, string.format("%s stopped at max_tokens before answering; raise explain.max_tokens", provider_name)
+		end
+		return nil, string.format("%s returned empty content (finish reason: %s)", provider_name, reason or "unknown")
 	end
 	return content, nil
 end

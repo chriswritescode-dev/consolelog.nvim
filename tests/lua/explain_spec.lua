@@ -36,6 +36,7 @@ describe("Explain annotation layer", function()
     package.loaded['consolelog'] = consolelog_mock
     explain.annotations = {}
     explain.pending = {}
+    explain.loading = {}
     display.extmarks = {}
   end
 
@@ -197,6 +198,31 @@ describe("Explain annotation layer", function()
     assert.equals(2, #marks, "One mark per line outside the re-rendered range")
   end)
 
+  it("opens a cursor-anchored float with the full explanation for the current line", function()
+    setup()
+
+    explain.render_annotations(test_bufnr, 1, 5, {
+      { line = 2, text = "a very long explanation of what the second line really does" },
+    })
+
+    local prev_buf = vim.api.nvim_win_get_buf(0)
+    vim.api.nvim_win_set_buf(0, test_bufnr)
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+    local win = explain.inspect(test_bufnr)
+    assert.not_nil(win, "float opens for an annotated line")
+    assert.is_true(vim.api.nvim_win_is_valid(win))
+    local float_buf = vim.api.nvim_win_get_buf(win)
+    local text = table.concat(vim.api.nvim_buf_get_lines(float_buf, 0, -1, false), " ")
+    assert.is_true(text:find("a very long explanation", 1, true) ~= nil, "float carries the full text")
+    vim.api.nvim_win_close(win, true)
+
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    assert.is_nil(explain.inspect(test_bufnr), "no float without an annotation on the line")
+
+    vim.api.nvim_win_set_buf(0, prev_buf)
+  end)
+
   it("does not raise on an invalid buffer", function()
     setup()
 
@@ -243,6 +269,7 @@ describe("Explain range orchestration", function()
     package.loaded['consolelog'] = consolelog_mock
     explain.annotations = {}
     explain.pending = {}
+    explain.loading = {}
     display.extmarks = {}
 
     llm_calls = {}
@@ -271,11 +298,12 @@ describe("Explain range orchestration", function()
     vim.notify = saved_notify
     vim.fn.jobstop = saved_jobstop
     package.loaded["consolelog.explain.llm"] = nil
+    explain.cancel(test_bufnr)
   end
 
-  local function notify_at(level)
+  local function notify_at(level, pattern)
     for _, call in ipairs(notify_calls) do
-      if call.level == level then
+      if call.level == level and (not pattern or call.msg:find(pattern, 1, true)) then
         return call
       end
     end
@@ -285,8 +313,8 @@ describe("Explain range orchestration", function()
   it("sends the whole buffer and renders one annotation per returned entry", function()
     setup()
 
-    local job_id = explain.explain_range(test_bufnr, 1, 5)
-    assert.equals(1, job_id)
+    local state = explain.explain_range(test_bufnr, 1, 5)
+    assert.equals(1, state.job_id)
     assert.equals(1, #llm_calls, "exactly one request")
     assert.is_true(llm_calls[1].prompt:find("1: const a = 1;") ~= nil, "prompt carries the first line with its absolute number")
     assert.is_true(llm_calls[1].prompt:find("5: const e = 5;") ~= nil, "prompt carries the last line with its absolute number")
@@ -296,21 +324,55 @@ describe("Explain range orchestration", function()
     assert.is_nil(explain.pending[test_bufnr], "pending entry is cleared on completion")
     local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
     assert.equals(2, #marks, "one extmark per returned entry")
-    local info = notify_at(vim.log.levels.INFO)
+    local info = notify_at(vim.log.levels.INFO, "Explained")
     assert.not_nil(info)
     assert.equals("Explained 2 lines", info.msg)
     teardown()
   end)
 
-  it("sends only the requested sub-range and renders only inside it", function()
+  it("shows an animated toast while the request is pending and resolves it on completion", function()
     setup()
 
-    local job_id = explain.explain_range(test_bufnr, 3, 4)
-    assert.equals(1, job_id)
+    explain.explain_range(test_bufnr, 1, 5)
+    local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
+    assert.equals(0, #marks, "no extmarks while the request is pending")
+    assert.not_nil(explain.loading[test_bufnr], "loading toast is tracked while pending")
+    local toast = notify_at(vim.log.levels.INFO, "Explaining 5 lines")
+    assert.not_nil(toast, "spinner toast announces the pending request")
+
+    llm_calls[1].on_done('{"explanations":[{"line":1,"text":"one"}]}', nil)
+
+    marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
+    assert.equals(1, #marks, "the rendered annotation replaces the pending state")
+    assert.is_nil(explain.loading[test_bufnr], "loading toast is cleared on completion")
+    assert.not_nil(notify_at(vim.log.levels.INFO, "Explained 1 line"), "final toast replaces the spinner")
+    teardown()
+  end)
+
+  it("clears the loading toast when the request fails", function()
+    setup()
+
+    explain.explain_range(test_bufnr, 1, 5)
+    assert.not_nil(explain.loading[test_bufnr], "loading is tracked while pending")
+
+    llm_calls[1].on_done(nil, "boom")
+
+    local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
+    assert.equals(0, #marks, "no marks remain after an error")
+    assert.is_nil(explain.loading[test_bufnr], "loading toast is cleared on error")
+    teardown()
+  end)
+
+  it("sends the whole file as context but explains only the requested sub-range", function()
+    setup()
+
+    local state = explain.explain_range(test_bufnr, 3, 4)
+    assert.equals(1, state.job_id)
     assert.equals(1, #llm_calls)
     assert.is_true(llm_calls[1].prompt:find("3: const c = 3;") ~= nil, "prompt carries the sub-range start")
     assert.is_true(llm_calls[1].prompt:find("4: const d = 4;") ~= nil, "prompt carries the sub-range end")
-    assert.is_false(llm_calls[1].prompt:find("1: const a = 1;") ~= nil, "lines outside the range are not sent")
+    assert.is_true(llm_calls[1].prompt:find("1: const a = 1;") ~= nil, "the rest of the file rides along as context")
+    assert.is_true(llm_calls[1].prompt:find("Explain only lines 3-4", 1, true) ~= nil, "instruction bounds the explained range")
 
     llm_calls[1].on_done('{"explanations":[{"line":1,"text":"outside"},{"line":3,"text":"three"},{"line":4,"text":"four"}]}', nil)
 
@@ -321,18 +383,100 @@ describe("Explain range orchestration", function()
     teardown()
   end)
 
-  it("rejects a range larger than max_lines without starting a request", function()
+  it("truncates context to the lines above the chunk when the file exceeds max_context_lines", function()
+    setup()
+    consolelog_mock.config.explain.max_lines = 2
+    consolelog_mock.config.explain.max_context_lines = 3
+
+    explain.explain_range(test_bufnr, 1, 5)
+    llm_calls[1].on_done('{"explanations":[{"line":1,"text":"one"}]}', nil)
+
+    local second = llm_calls[2].prompt
+    assert.is_true(second:find("Explain only lines 3-4", 1, true) ~= nil)
+    assert.is_true(second:find("2: const b = 2;") ~= nil, "one line above the chunk fits the budget")
+    assert.is_false(second:find("1: const a = 1;") ~= nil, "lines beyond the context budget are dropped")
+    assert.is_false(second:find("5: const e = 5;") ~= nil, "lines below the chunk are not sent when truncating")
+    teardown()
+  end)
+
+  it("splits a range larger than max_lines into sequential chunk requests", function()
     setup()
     consolelog_mock.config.explain.max_lines = 2
 
-    local result = explain.explain_range(test_bufnr, 1, 5)
-    assert.is_nil(result)
-    assert.equals(0, #llm_calls, "llm.request must never be called")
-    assert.equals(0, #jobstop_calls)
+    explain.explain_range(test_bufnr, 1, 5)
+    assert.equals(1, #llm_calls, "only the first chunk is requested up front")
+    assert.is_true(llm_calls[1].prompt:find("1: const a = 1;") ~= nil, "first chunk starts at line 1")
+    assert.is_true(llm_calls[1].prompt:find("Explain only lines 1-2", 1, true) ~= nil, "first request explains the first chunk")
+
+    llm_calls[1].on_done('{"explanations":[{"line":1,"text":"one"}]}', nil)
+
+    assert.equals(2, #llm_calls, "next chunk starts after the first completes")
+    assert.is_true(llm_calls[2].prompt:find("Explain only lines 3-4", 1, true) ~= nil, "second request explains the next chunk")
+    assert.equals(1, #explain.annotations[test_bufnr], "first chunk renders before the second completes")
+    assert.not_nil(explain.loading[test_bufnr], "loading indicator moves to the pending chunk")
+
+    llm_calls[2].on_done('{"explanations":[{"line":3,"text":"three"},{"line":4,"text":"four"}]}', nil)
+    assert.equals(3, #llm_calls, "third chunk follows")
+    llm_calls[3].on_done('{"explanations":[{"line":5,"text":"five"}]}', nil)
+
+    assert.is_nil(explain.pending[test_bufnr], "pipeline is finished")
+    assert.is_nil(explain.loading[test_bufnr], "loading indicator is gone")
+    local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
+    assert.equals(4, #marks, "annotations from every chunk stay rendered")
+    local info = notify_at(vim.log.levels.INFO, "Explained")
+    assert.not_nil(info)
+    assert.equals("Explained 4 lines", info.msg)
+    teardown()
+  end)
+
+  it("anchors the first chunk exactly at the cursor line and wraps to cover the top", function()
+    local chunks = explain.chunk_ranges(1, 10, 4, 6)
+    assert.equals(4, #chunks)
+    assert.deep_equals({ s = 6, e = 9 }, chunks[1], "first chunk starts at the cursor line")
+    assert.deep_equals({ s = 10, e = 10 }, chunks[2], "following chunk continues downward")
+    assert.deep_equals({ s = 1, e = 4 }, chunks[3], "the top is covered after the wrap")
+    assert.deep_equals({ s = 5, e = 5 }, chunks[4], "the wrap stops just before the anchor")
+
+    local no_cursor = explain.chunk_ranges(1, 10, 4, nil)
+    assert.deep_equals({ s = 1, e = 4 }, no_cursor[1], "no cursor info starts at the top")
+
+    local outside = explain.chunk_ranges(1, 10, 4, 99)
+    assert.deep_equals({ s = 1, e = 4 }, outside[1], "a cursor outside the range starts at the top")
+  end)
+
+  it("survives a notifier that raises and still completes the pipeline", function()
+    setup()
+    vim.notify = function()
+      error("notifier exploded")
+    end
+
+    local state = explain.explain_range(test_bufnr, 1, 5)
+    assert.not_nil(state, "the pipeline starts despite the notifier raising")
+
+    llm_calls[1].on_done('{"explanations":[{"line":1,"text":"one"}]}', nil)
+
+    assert.is_nil(explain.pending[test_bufnr], "pipeline completes despite notifier errors")
+    assert.is_nil(explain.loading[test_bufnr], "loading state is cleaned up")
+    local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
+    assert.equals(1, #marks, "annotations render even when the notifier is broken")
+    teardown()
+  end)
+
+  it("aborts the remaining chunks when one chunk fails", function()
+    setup()
+    consolelog_mock.config.explain.max_lines = 2
+
+    explain.explain_range(test_bufnr, 1, 5)
+    llm_calls[1].on_done('{"explanations":[{"line":1,"text":"one"}]}', nil)
+    llm_calls[2].on_done(nil, "boom")
+
+    assert.equals(2, #llm_calls, "no further chunk is requested after a failure")
+    assert.is_nil(explain.pending[test_bufnr], "pipeline is dropped on error")
+    assert.is_nil(explain.loading[test_bufnr], "loading indicator is cleared on error")
+    assert.equals(1, #explain.annotations[test_bufnr], "annotations from completed chunks survive")
     local err = notify_at(vim.log.levels.ERROR)
     assert.not_nil(err)
-    assert.is_true(err.msg:find("5") ~= nil, "error names the requested count")
-    assert.is_true(err.msg:find("2") ~= nil, "error names the limit")
+    assert.is_true(err.msg:find("boom") ~= nil)
     teardown()
   end)
 
@@ -366,11 +510,11 @@ describe("Explain range orchestration", function()
     setup()
 
     local first = explain.explain_range(test_bufnr, 1, 5)
-    assert.equals(1, first)
+    assert.equals(1, first.job_id)
     local second = explain.explain_range(test_bufnr, 2, 3)
-    assert.equals(2, second)
+    assert.equals(2, second.job_id)
     assert.deep_equals({ 1 }, jobstop_calls, "the first job is stopped")
-    assert.equals(2, explain.pending[test_bufnr], "only the newest job stays pending")
+    assert.equals(2, explain.pending[test_bufnr].job_id, "only the newest job stays pending")
     teardown()
   end)
 
@@ -497,20 +641,22 @@ describe("Explain command surface", function()
     local config = require("consolelog").config
     assert.equals("openai", config.explain.provider)
     assert.equals("gpt-4o-mini", config.explain.model)
-    assert.equals(2048, config.explain.max_tokens)
-    assert.equals(300, config.explain.max_lines)
-    assert.equals(60000, config.explain.timeout_ms)
+    assert.equals(32768, config.explain.max_tokens)
+    assert.is_nil(config.explain.temperature, "temperature stays unset so the server default applies")
+    assert.equals(50, config.explain.max_lines)
+    assert.equals(120000, config.explain.timeout_ms)
     assert.equals(80, config.explain.max_width)
     assert.equals(" ⟩ ", config.explain.prefix)
     assert.is_nil(config.explain.url, "url stays absent so it can be overridden")
     assert.is_nil(config.explain.api_key_env, "api_key_env stays absent so it can be overridden")
     assert.equals("<leader>le", config.keymaps.explain)
     assert.equals("<leader>lE", config.keymaps.explain_clear)
+    assert.equals("<leader>lI", config.keymaps.explain_inspect)
 
     require("consolelog.core.init").setup({ explain = { provider = "anthropic", url = "https://custom.example" } })
     assert.equals("anthropic", require("consolelog").config.explain.provider, "user provider override wins")
     assert.equals("https://custom.example", require("consolelog").config.explain.url, "user url override wins")
-    assert.equals(2048, require("consolelog").config.explain.max_tokens, "unset fields keep defaults")
+    assert.equals(32768, require("consolelog").config.explain.max_tokens, "unset fields keep defaults")
   end)
 
   it("maps explain to both normal and visual mode and clear to normal", function()
@@ -558,6 +704,7 @@ describe("Explain persistence", function()
     package.loaded["consolelog.explain"] = explain
     explain.annotations = {}
     explain.pending = {}
+    explain.loading = {}
     display.extmarks = {}
 
     require("consolelog.core.autocmds").setup()
@@ -725,6 +872,7 @@ describe("Explain visibility toggle", function()
     package.loaded["consolelog.explain"] = explain
     explain.annotations = {}
     explain.pending = {}
+    explain.loading = {}
     explain.hidden = {}
     display.extmarks = {}
 
@@ -893,8 +1041,8 @@ describe("Explain visibility toggle", function()
     explain.toggle(test_bufnr)
     assert.is_true(explain.hidden[test_bufnr] == true, "hidden before re-explain")
 
-    local job_id = explain.explain_range(test_bufnr, 1, 5)
-    assert.equals(1, job_id)
+    local state = explain.explain_range(test_bufnr, 1, 5)
+    assert.equals(1, state.job_id)
     llm_calls[1].on_done('{"explanations":[{"line":1,"text":"new"}]}', nil)
 
     local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
@@ -913,8 +1061,8 @@ describe("Explain visibility toggle", function()
     explain.toggle(test_bufnr)
     assert.is_true(explain.hidden[test_bufnr] == true, "hidden before re-explain")
 
-    local job_id = explain.explain_range(test_bufnr, 3, 4)
-    assert.equals(1, job_id)
+    local state = explain.explain_range(test_bufnr, 3, 4)
+    assert.equals(1, state.job_id)
     llm_calls[1].on_done('{"explanations":[{"line":3,"text":"three-new"}]}', nil)
 
     local entries = explain.annotations[test_bufnr]
