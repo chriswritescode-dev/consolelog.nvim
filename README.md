@@ -107,6 +107,7 @@ ConsoleLog automatically detects your project type and enables console capture:
 | `<leader>lE` | `:ConsoleLogExplainClear` | Clear inline code explanations |
 | `<leader>lv` | `:ConsoleLogExplainToggle` | Hide/show cached explanations to see the code unobstructed |
 | `<leader>lI` | `:ConsoleLogExplainInspect` | Open the full explanation for the current line in a float (like the diagnostics float) |
+| `<leader>lS` | `:ConsoleLogExplainStop` | Stop an in-flight explain request |
 
 ### Debug Commands
 
