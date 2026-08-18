@@ -2,12 +2,17 @@ local constants = require("consolelog.core.constants")
 
 local M = {}
 
-local function build_body(cfg, prompt)
+local function build_body(cfg, prompt, provider)
 	local body = {
 		model = cfg.model,
 		messages = { { role = "user", content = prompt } },
 		max_tokens = cfg.max_tokens,
 	}
+	if provider.supports_response_format and cfg.response_format == "json_schema" then
+		body.response_format = { type = "json_schema", json_schema = constants.EXPLAIN.JSON_SCHEMA }
+	elseif provider.supports_response_format and cfg.response_format == "json_object" then
+		body.response_format = { type = "json_object" }
+	end
 	if type(cfg.temperature) == "number" then
 		body.temperature = cfg.temperature
 	end
@@ -23,6 +28,7 @@ M.providers = {
 	openai = {
 		url = "https://api.openai.com/v1/chat/completions",
 		api_key_env = "OPENAI_API_KEY",
+		supports_response_format = true,
 		build_headers = function(api_key)
 			return { "Authorization: Bearer " .. api_key }
 		end,
@@ -108,7 +114,7 @@ function M.build_request(cfg, prompt)
 		end
 	end
 
-	local body = vim.json.encode(provider.build_body(cfg, prompt))
+	local body = vim.json.encode(provider.build_body(cfg, prompt, provider))
 
 	local cmd = { "curl", "-sS", "-X", "POST", cfg.url or provider.url }
 	for _, arg in ipairs(header_args) do

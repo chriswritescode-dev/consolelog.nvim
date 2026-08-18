@@ -550,6 +550,7 @@ describe("Explain range orchestration", function()
 
   it("reports a model response that fails parsing without rendering", function()
     setup()
+    consolelog_mock.config.explain.max_retries = 0
 
     explain.explain_range(test_bufnr, 1, 5)
     llm_calls[1].on_done('{"explanations": [{"line": 1, "text": "x"}', nil)
@@ -559,6 +560,45 @@ describe("Explain range orchestration", function()
     assert.is_true(err.msg:find("could not decode model response as JSON") ~= nil, "error carries the parser message")
     local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
     assert.equals(0, #marks)
+    teardown()
+  end)
+
+  it("retries a chunk whose response fails JSON parsing and succeeds on retry", function()
+    setup()
+    consolelog_mock.config.explain.max_retries = 2
+
+    explain.explain_range(test_bufnr, 1, 5)
+    llm_calls[1].on_done('{"explanations": [{"line": 1, "text": "x"}', nil)
+
+    assert.equals(2, #llm_calls, "a parse failure triggers a retry request")
+    assert.is_true(llm_calls[2].prompt:find("could not be parsed as JSON") ~= nil, "retry prompt carries a corrective hint")
+    assert.not_nil(explain.pending[test_bufnr], "the run stays pending across retries")
+    assert.not_nil(notify_at(vim.log.levels.INFO, "Retrying"), "the spinner announces the retry")
+
+    llm_calls[2].on_done('{"explanations":[{"line":1,"text":"one"}]}', nil)
+
+    assert.is_nil(explain.pending[test_bufnr], "pending is cleared once the retry succeeds")
+    local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
+    assert.equals(1, #marks, "the retried response renders its annotations")
+    teardown()
+  end)
+
+  it("gives up after max_retries parse failures and surfaces the error", function()
+    setup()
+    consolelog_mock.config.explain.max_retries = 2
+
+    explain.explain_range(test_bufnr, 1, 5)
+    llm_calls[1].on_done('{"explanations": [{"line": 1, "text": "x"}', nil)
+    llm_calls[2].on_done('{"explanations": [{"line": 2, "text": "y"}', nil)
+    llm_calls[3].on_done('{"explanations": [{"line": 3, "text": "z"}', nil)
+
+    assert.equals(3, #llm_calls, "the initial request plus two retries")
+    local err = notify_at(vim.log.levels.ERROR)
+    assert.not_nil(err)
+    assert.is_true(err.msg:find("could not decode model response as JSON") ~= nil, "the final parse error is surfaced")
+    assert.is_nil(explain.pending[test_bufnr], "pending is cleared after retries are exhausted")
+    local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
+    assert.equals(0, #marks, "nothing renders after retries are exhausted")
     teardown()
   end)
 end)
@@ -647,6 +687,8 @@ describe("Explain command surface", function()
     assert.equals(120000, config.explain.timeout_ms)
     assert.equals(80, config.explain.max_width)
     assert.equals("", config.explain.prefix)
+    assert.equals(2, config.explain.max_retries)
+    assert.equals("json_schema", config.explain.response_format)
     assert.is_nil(config.explain.url, "url stays absent so it can be overridden")
     assert.is_nil(config.explain.api_key_env, "api_key_env stays absent so it can be overridden")
     assert.equals("<leader>le", config.keymaps.explain)

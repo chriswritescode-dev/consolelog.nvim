@@ -171,6 +171,8 @@ The plugin works out of the box with sensible defaults. Here's the full configur
         max_context_lines = 1000, -- Whole file rides along as context up to this many lines; larger files send only the lines above the chunk
         prefix = "",              -- Prefix before each explanation
         max_width = 80,          -- Wrap explanations wider than this into virtual lines below the code
+        max_retries = 2,         -- Retry a chunk when the model response is not valid JSON
+        response_format = "json_schema", -- Structured output: "json_schema", "json_object", or false to disable
       },
       keymaps = {
         enabled = true,          -- Enable default keymaps
@@ -241,6 +243,7 @@ explain = {
   url = "http://localhost:11434/v1/chat/completions",
   api_key_env = false, -- no API key required
   model = "qwen2.5-coder",
+  response_format = false, -- Ollama has no response_format support; parsing relies on the retry path
 },
 ```
 
@@ -255,6 +258,8 @@ explain = {
 - Explanations work in any regular buffer regardless of filetype; if you lazy-load the plugin, make sure the explain commands/keys are in your `cmd`/`keys` triggers.
 - A response arriving after the buffer changed mid-request is discarded with a warning; remaining chunks are aborted.
 - `max_tokens` (default 32768) leaves headroom for reasoning models that spend tokens thinking before answering; a truncated response reports "stopped at max_tokens" instead of failing silently. `temperature` is only sent when explicitly set to a number — by default the server/model generation defaults apply.
+- The `openai` provider enforces the response schema via `response_format = "json_schema"` by default, so the model can only emit the required `{"explanations":[...]}` shape. Set `response_format = "json_object"` for servers without JSON-schema support, or `false` to disable enforcement (e.g. Ollama). Anthropic does not support `response_format`.
+- If a response still fails JSON parsing, the chunk is retried up to `max_retries` (default 2) with a corrective hint appended; the spinner shows `Retrying lines N-M (1/2)` between attempts.
 - Each request sends the file as numbered context (with an instruction bounding the lines to explain) so explanations understand imports and enclosing scopes. When the file is longer than `max_context_lines` (default 1000), only a window of that many lines ending at the chunk's last line is sent instead. When the whole file fits, every request carries the identical file prefix, which plays well with server-side prefix caching (e.g. vLLM).
 - A chunk with nothing worth explaining (all comments or docstrings) is a valid empty answer, not an error — this also keeps reasoning models from spiraling on doc-heavy chunks.
 - `extra_body` merges arbitrary fields into the request body for server-specific options, e.g. `{ chat_template_kwargs = { thinking = false } }` to disable the thinking channel on vLLM.

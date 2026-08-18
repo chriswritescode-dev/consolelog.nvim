@@ -92,6 +92,8 @@ M.config = {
 		max_context_lines = constants.EXPLAIN.DEFAULT_MAX_CONTEXT_LINES,
 		prefix = constants.EXPLAIN.DEFAULT_PREFIX,
 		max_width = 80,
+		max_retries = constants.EXPLAIN.DEFAULT_MAX_RETRIES,
+		response_format = constants.EXPLAIN.DEFAULT_RESPONSE_FORMAT,
 	},
 	keymaps = {
 		enabled = true,

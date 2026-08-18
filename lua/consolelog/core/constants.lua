@@ -108,7 +108,29 @@ M.EXPLAIN = {
 	DEFAULT_MAX_CONTEXT_LINES = 1000,
 	DEFAULT_TIMEOUT_MS = 120000,
 	EXTMARK_PRIORITY = 200,
-	MAX_WORDS = 12
+	MAX_WORDS = 12,
+	DEFAULT_MAX_RETRIES = 2,
+	DEFAULT_RESPONSE_FORMAT = "json_schema",
+	RETRY_HINT = "\n\nYour previous response could not be parsed as JSON. Reply with ONLY the JSON object described above - no prose, no markdown, no code fences.",
+	JSON_SCHEMA = {
+		type = "object",
+		properties = {
+			explanations = {
+				type = "array",
+				items = {
+					type = "object",
+					properties = {
+						line = { type = "integer" },
+						text = { type = "string" },
+					},
+					required = { "line", "text" },
+					additionalProperties = false,
+				},
+			},
+		},
+		required = { "explanations" },
+		additionalProperties = false,
+	},
 }
 
 function M.is_single_file_runnable(filepath)

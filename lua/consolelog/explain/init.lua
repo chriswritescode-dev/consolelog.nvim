@@ -1,6 +1,7 @@
 local constants = require("consolelog.core.constants")
 local vtext_builder = require("consolelog.display.virtual_text_builder")
 local extmark_writer = require("consolelog.display.extmark_writer")
+local prompt = require("consolelog.explain.prompt")
 
 local M = {}
 
@@ -272,6 +273,56 @@ local function cursor_line_in(bufnr)
 end
 
 local run_chunk
+local request_chunk
+request_chunk = function(bufnr, state, chunk, prompt_text)
+	local llm = require("consolelog.explain.llm")
+	local on_done = function(content, err)
+		if M.pending[bufnr] ~= state then
+			return
+		end
+		if err then
+			M.pending[bufnr] = nil
+			stop_loading(bufnr, "ConsoleLog explain: " .. err, vim.log.levels.ERROR)
+			return
+		end
+		if not vim.api.nvim_buf_is_valid(bufnr) then
+			M.pending[bufnr] = nil
+			stop_loading(bufnr, "Explain aborted: buffer is gone", vim.log.levels.WARN)
+			return
+		end
+		if vim.api.nvim_buf_get_changedtick(bufnr) ~= state.tick then
+			M.pending[bufnr] = nil
+			stop_loading(bufnr, "Buffer changed while explaining; run :ConsoleLogExplain again", vim.log.levels.WARN)
+			return
+		end
+		local annotations, parse_err = prompt.parse(content, chunk.s, chunk.e)
+		if not annotations then
+			if state.attempts < state.max_retries then
+				state.attempts = state.attempts + 1
+				local loading = M.loading[bufnr]
+				if loading then
+					loading.msg = string.format("Retrying lines %d-%d (%d/%d)", chunk.s, chunk.e, state.attempts, state.max_retries)
+					spin(bufnr)
+				end
+				request_chunk(bufnr, state, chunk, prompt_text .. constants.EXPLAIN.RETRY_HINT)
+				return
+			end
+			M.pending[bufnr] = nil
+			stop_loading(bufnr, "ConsoleLog explain: " .. parse_err, vim.log.levels.ERROR)
+			return
+		end
+		if M.hidden[bufnr] then
+			M.hidden[bufnr] = nil
+			M.restore(bufnr)
+		end
+		state.attempts = 0
+		state.rendered = state.rendered + M.render_annotations(bufnr, chunk.s, chunk.e, annotations)
+		state.index = state.index + 1
+		run_chunk(bufnr, state)
+	end
+	state.job_id = llm.request(state.cfg, prompt_text, on_done)
+end
+
 run_chunk = function(bufnr, state)
 	local chunk = state.chunks[state.index]
 	if not chunk then
@@ -308,45 +359,8 @@ run_chunk = function(bufnr, state)
 		table.insert(context, buffer_lines[i])
 	end
 
-	local prompt = require("consolelog.explain.prompt")
 	local prompt_text = prompt.build(context, ctx_s, chunk.s, chunk.e, vim.bo[bufnr].filetype)
-
-	local on_done = function(content, err)
-		if M.pending[bufnr] ~= state then
-			return
-		end
-		if err then
-			M.pending[bufnr] = nil
-			stop_loading(bufnr, "ConsoleLog explain: " .. err, vim.log.levels.ERROR)
-			return
-		end
-		if not vim.api.nvim_buf_is_valid(bufnr) then
-			M.pending[bufnr] = nil
-			stop_loading(bufnr, "Explain aborted: buffer is gone", vim.log.levels.WARN)
-			return
-		end
-		if vim.api.nvim_buf_get_changedtick(bufnr) ~= state.tick then
-			M.pending[bufnr] = nil
-			stop_loading(bufnr, "Buffer changed while explaining; run :ConsoleLogExplain again", vim.log.levels.WARN)
-			return
-		end
-		local annotations, parse_err = prompt.parse(content, chunk.s, chunk.e)
-		if not annotations then
-			M.pending[bufnr] = nil
-			stop_loading(bufnr, "ConsoleLog explain: " .. parse_err, vim.log.levels.ERROR)
-			return
-		end
-		if M.hidden[bufnr] then
-			M.hidden[bufnr] = nil
-			M.restore(bufnr)
-		end
-		state.rendered = state.rendered + M.render_annotations(bufnr, chunk.s, chunk.e, annotations)
-		state.index = state.index + 1
-		run_chunk(bufnr, state)
-	end
-
-	local llm = require("consolelog.explain.llm")
-	state.job_id = llm.request(state.cfg, prompt_text, on_done)
+	request_chunk(bufnr, state, chunk, prompt_text)
 end
 
 function M.inspect(bufnr)
@@ -442,6 +456,10 @@ function M.explain_range(bufnr, start_line, end_line)
 	M.cancel(bufnr)
 
 	local cfg = require("consolelog").config.explain or {}
+	local max_retries = cfg.max_retries
+	if type(max_retries) ~= "number" or max_retries < 0 then
+		max_retries = constants.EXPLAIN.DEFAULT_MAX_RETRIES
+	end
 	local state = {
 		cfg = cfg,
 		tick = vim.api.nvim_buf_get_changedtick(bufnr),
@@ -453,6 +471,8 @@ function M.explain_range(bufnr, start_line, end_line)
 		),
 		index = 1,
 		rendered = 0,
+		max_retries = max_retries,
+		attempts = 0,
 	}
 	M.pending[bufnr] = state
 	run_chunk(bufnr, state)

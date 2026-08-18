@@ -117,6 +117,77 @@ describe("Explain LLM request builder", function()
     teardown()
   end)
 
+  it("sends a json_schema response_format when configured", function()
+    setup()
+    fake_env["OPENAI_API_KEY"] = "test-key"
+    local request = llm.build_request({
+      provider = "openai",
+      model = "gpt-4o-mini",
+      max_tokens = 300,
+      response_format = "json_schema",
+    }, "explain this line")
+    local decoded = vim.json.decode(request.body)
+    assert.equals("json_schema", decoded.response_format.type)
+    assert.equals("array", decoded.response_format.json_schema.properties.explanations.type)
+    local item = decoded.response_format.json_schema.properties.explanations.items
+    assert.equals("integer", item.properties.line.type)
+    assert.equals("string", item.properties.text.type)
+    teardown()
+  end)
+
+  it("sends a json_object response_format when configured", function()
+    setup()
+    fake_env["OPENAI_API_KEY"] = "test-key"
+    local request = llm.build_request({
+      provider = "openai",
+      model = "gpt-4o-mini",
+      max_tokens = 300,
+      response_format = "json_object",
+    }, "explain this line")
+    assert.equals("json_object", vim.json.decode(request.body).response_format.type)
+    teardown()
+  end)
+
+  it("omits response_format when disabled", function()
+    setup()
+    fake_env["OPENAI_API_KEY"] = "test-key"
+    local request = llm.build_request({
+      provider = "openai",
+      model = "gpt-4o-mini",
+      max_tokens = 300,
+      response_format = false,
+    }, "explain this line")
+    assert.is_nil(vim.json.decode(request.body).response_format)
+    teardown()
+  end)
+
+  it("never sends response_format to anthropic", function()
+    setup()
+    fake_env["ANTHROPIC_API_KEY"] = "test-key"
+    local request = llm.build_request({
+      provider = "anthropic",
+      model = "claude-3-5-sonnet",
+      max_tokens = 300,
+      response_format = "json_schema",
+    }, "the prompt")
+    assert.is_nil(vim.json.decode(request.body).response_format)
+    teardown()
+  end)
+
+  it("lets cfg.extra_body override the response_format", function()
+    setup()
+    fake_env["OPENAI_API_KEY"] = "test-key"
+    local request = llm.build_request({
+      provider = "openai",
+      model = "gpt-4o-mini",
+      max_tokens = 300,
+      response_format = "json_schema",
+      extra_body = { response_format = { type = "json_object" } },
+    }, "explain this line")
+    assert.equals("json_object", vim.json.decode(request.body).response_format.type)
+    teardown()
+  end)
+
   it("builds an anthropic request with x-api-key and version headers", function()
     setup()
     fake_env["ANTHROPIC_API_KEY"] = "test-key"
