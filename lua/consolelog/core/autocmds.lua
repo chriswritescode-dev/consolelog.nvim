@@ -53,6 +53,7 @@ function M.setup()
 	vim.api.nvim_create_autocmd("BufReadPost", {
 		group = group,
 		callback = function()
+			require("consolelog.explain").restore(vim.api.nvim_get_current_buf())
 			local bufnr = vim.api.nvim_get_current_buf()
 			local winid = vim.api.nvim_get_current_win()
 
@@ -76,6 +77,7 @@ function M.setup()
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		group = group,
 		callback = function(args)
+			require("consolelog.explain").sync_lines(args.buf)
 			local bufnr = args.buf
 			local winid = vim.api.nvim_get_current_win()
 			local consolelog = require("consolelog")

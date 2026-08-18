@@ -80,6 +80,22 @@ function M.setup()
 		fg = "#9d7cd8",
 		default = true
 	})
+
+	vim.api.nvim_set_hl(0, "ConsoleLogExplain", {
+		fg = "#1a1b26",
+		bg = "#9ece6a",
+		default = true
+	})
+
+	vim.api.nvim_set_hl(0, "ConsoleLogExplainLeft", {
+		fg = "#9ece6a",
+		default = true
+	})
+
+	vim.api.nvim_set_hl(0, "ConsoleLogExplainRight", {
+		fg = "#9ece6a",
+		default = true
+	})
 end
 
 return M

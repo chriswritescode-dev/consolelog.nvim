@@ -7,9 +7,9 @@ function M.setup(config)
 
 	local keymaps = config.keymaps
 
-	local function set_keymap(key, command, desc)
+	local function set_keymap(key, command, desc, mode)
 		if key and key ~= "" then
-			vim.keymap.set("n", key, command, { desc = desc, silent = true })
+			vim.keymap.set(mode or "n", key, command, { desc = desc, silent = true })
 		end
 	end
 
@@ -21,6 +21,11 @@ function M.setup(config)
 	set_keymap(keymaps.inspect_buffer, ":ConsoleLogInspectBuffer<CR>", "Inspect all outputs for current buffer")
 	set_keymap(keymaps.reload, ":ConsoleLogReload<CR>", "Reload ConsoleLog plugin")
 	set_keymap(keymaps.debug_toggle, ":ConsoleLogDebugToggle<CR>", "Toggle debug logging on/off")
+	set_keymap(keymaps.explain, ":ConsoleLogExplain<CR>", "Explain code inline (whole buffer)", "n")
+	set_keymap(keymaps.explain, ":ConsoleLogExplain<CR>", "Explain code inline (selection)", "x")
+	set_keymap(keymaps.explain_clear, ":ConsoleLogExplainClear<CR>", "Clear inline code explanations", "n")
+	set_keymap(keymaps.explain_toggle, ":ConsoleLogExplainToggle<CR>", "Toggle visibility of inline code explanations", "n")
+	set_keymap(keymaps.explain_inspect, ":ConsoleLogExplainInspect<CR>", "Show the full explanation for the current line", "n")
 end
 
 return M
