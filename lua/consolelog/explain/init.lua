@@ -162,13 +162,27 @@ function M.clear(bufnr, start_line, end_line)
 	pcall(vim.api.nvim_buf_clear_namespace, bufnr, M.namespace, (start_line or 1) - 1, end_line or -1)
 end
 
-function M.cancel(bufnr)
+function M.cancel(bufnr, quiet)
 	local state = M.pending[bufnr]
 	if state and state.job_id then
 		vim.fn.jobstop(state.job_id)
 	end
 	M.pending[bufnr] = nil
-	hide_loading(bufnr)
+	local loading = hide_loading(bufnr)
+	if not quiet and loading then
+		local opts = toast_opts(bufnr, loading)
+		opts.timeout = nil
+		notify_toast("Explain stopped", vim.log.levels.INFO, opts)
+	end
+end
+
+function M.stop(bufnr)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	if not M.pending[bufnr] and not M.loading[bufnr] then
+		vim.notify("Nothing to stop", vim.log.levels.INFO)
+		return
+	end
+	M.cancel(bufnr)
 end
 
 local function render_entry(bufnr, entry, line_count, config)
@@ -453,7 +467,7 @@ function M.explain_range(bufnr, start_line, end_line)
 		return nil
 	end
 
-	M.cancel(bufnr)
+	M.cancel(bufnr, true)
 
 	local cfg = require("consolelog").config.explain or {}
 	local max_retries = cfg.max_retries

@@ -518,6 +518,50 @@ describe("Explain range orchestration", function()
     teardown()
   end)
 
+  it("stops an in-flight request on demand and clears the loading toast", function()
+    setup()
+
+    explain.explain_range(test_bufnr, 1, 5)
+    assert.not_nil(explain.loading[test_bufnr], "loading is tracked while pending")
+
+    explain.stop(test_bufnr)
+
+    assert.is_nil(explain.pending[test_bufnr], "pending state is cleared on stop")
+    assert.is_nil(explain.loading[test_bufnr], "loading toast is cleared on stop")
+    assert.deep_equals({ 1 }, jobstop_calls, "the in-flight job is stopped")
+    assert.not_nil(notify_at(vim.log.levels.INFO, "Explain stopped"), "stop is announced")
+    local marks = vim.api.nvim_buf_get_extmarks(test_bufnr, explain.namespace, 0, -1, {})
+    assert.equals(0, #marks, "no annotations render after a stop")
+    teardown()
+  end)
+
+  it("keeps completed chunk annotations when stopping mid-pipeline", function()
+    setup()
+    consolelog_mock.config.explain.max_lines = 2
+
+    explain.explain_range(test_bufnr, 1, 5)
+    llm_calls[1].on_done('{"explanations":[{"line":1,"text":"one"}]}', nil)
+    assert.equals(2, #llm_calls, "second chunk is in flight")
+
+    explain.stop(test_bufnr)
+
+    assert.equals(2, #llm_calls, "no further chunk is requested after a stop")
+    assert.deep_equals({ 2 }, jobstop_calls, "only the in-flight job is stopped")
+    assert.equals(1, #explain.annotations[test_bufnr], "annotations from the completed chunk survive")
+    assert.not_nil(explain.annotations[test_bufnr][1], "the surviving entry is line 1")
+    teardown()
+  end)
+
+  it("notifies when there is nothing to stop", function()
+    setup()
+
+    explain.stop(test_bufnr)
+
+    assert.equals("Nothing to stop", notify_at(vim.log.levels.INFO).msg)
+    assert.equals(0, #jobstop_calls)
+    teardown()
+  end)
+
   it("surfaces request errors without touching the annotation layer", function()
     setup()
 
@@ -683,7 +727,7 @@ describe("Explain command surface", function()
     assert.equals("gpt-4o-mini", config.explain.model)
     assert.equals(32768, config.explain.max_tokens)
     assert.is_nil(config.explain.temperature, "temperature stays unset so the server default applies")
-    assert.equals(50, config.explain.max_lines)
+    assert.equals(25, config.explain.max_lines)
     assert.equals(120000, config.explain.timeout_ms)
     assert.equals(80, config.explain.max_width)
     assert.equals("", config.explain.prefix)

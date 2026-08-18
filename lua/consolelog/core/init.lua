@@ -88,7 +88,7 @@ M.config = {
 		max_tokens = 32768,
 		extra_body = nil,
 		timeout_ms = constants.EXPLAIN.DEFAULT_TIMEOUT_MS,
-		max_lines = constants.EXPLAIN.DEFAULT_MAX_LINES,
+		max_lines = 25,
 		max_context_lines = constants.EXPLAIN.DEFAULT_MAX_CONTEXT_LINES,
 		prefix = constants.EXPLAIN.DEFAULT_PREFIX,
 		max_width = 80,
@@ -109,6 +109,7 @@ M.config = {
 		explain_clear = "<leader>lE",
 		explain_toggle = "<leader>lv",
 		explain_inspect = "<leader>lI",
+		explain_stop = "<leader>lS",
 	},
 }
 

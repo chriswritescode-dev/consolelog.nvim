@@ -26,6 +26,7 @@ function M.setup(config)
 	set_keymap(keymaps.explain_clear, ":ConsoleLogExplainClear<CR>", "Clear inline code explanations", "n")
 	set_keymap(keymaps.explain_toggle, ":ConsoleLogExplainToggle<CR>", "Toggle visibility of inline code explanations", "n")
 	set_keymap(keymaps.explain_inspect, ":ConsoleLogExplainInspect<CR>", "Show the full explanation for the current line", "n")
+	set_keymap(keymaps.explain_stop, ":ConsoleLogExplainStop<CR>", "Stop an in-flight explain request", "n")
 end
 
 return M

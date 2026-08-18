@@ -56,6 +56,10 @@ function M.setup()
 		require("consolelog.explain").toggle(vim.api.nvim_get_current_buf())
 	end, { desc = "Toggle visibility of inline code explanations" })
 
+	vim.api.nvim_create_user_command("ConsoleLogExplainStop", function()
+		require("consolelog.explain").stop(vim.api.nvim_get_current_buf())
+	end, { desc = "Stop an in-flight explain request" })
+
 	vim.api.nvim_create_user_command("ConsoleLogDebugToggle", function()
 		require("consolelog.core.debug_logger").toggle()
 	end, { desc = "Toggle debug logging on/off" })

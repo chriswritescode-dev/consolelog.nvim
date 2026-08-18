@@ -167,7 +167,7 @@ The plugin works out of the box with sensible defaults. Here's the full configur
         max_tokens = 32768,      -- Maximum tokens per response (headroom for reasoning models)
         timeout_ms = 120000,     -- Request timeout in milliseconds
         extra_body = nil,        -- Extra fields merged into the request body, e.g. { chat_template_kwargs = { thinking = false } } for vLLM
-        max_lines = 50,          -- Lines per request; longer ranges are split into sequential chunks
+        max_lines = 25,          -- Lines per request; longer ranges are split into sequential chunks
         max_context_lines = 1000, -- Whole file rides along as context up to this many lines; larger files send only the lines above the chunk
         prefix = "",              -- Prefix before each explanation
         max_width = 80,          -- Wrap explanations wider than this into virtual lines below the code
@@ -188,6 +188,7 @@ The plugin works out of the box with sensible defaults. Here's the full configur
         explain_clear = "<leader>lE", -- Clear inline code explanations
         explain_toggle = "<leader>lv", -- Toggle explanation visibility
         explain_inspect = "<leader>lI", -- Show the full explanation for the current line in a float
+        explain_stop = "<leader>lS", -- Stop an in-flight explain request
       },
     })
   end,
@@ -207,6 +208,7 @@ The plugin works out of the box with sensible defaults. Here's the full configur
     { "<leader>lE", "<cmd>ConsoleLogExplainClear<cr>", desc = "Clear inline code explanations" },
     { "<leader>lv", "<cmd>ConsoleLogExplainToggle<cr>", desc = "Toggle explanation visibility" },
     { "<leader>lI", "<cmd>ConsoleLogExplainInspect<cr>", desc = "Show full explanation for current line" },
+    { "<leader>lS", "<cmd>ConsoleLogExplainStop<cr>",    desc = "Stop in-flight explain request" },
   },
   cmd = {
     "ConsoleLogToggle",
@@ -224,6 +226,7 @@ The plugin works out of the box with sensible defaults. Here's the full configur
     "ConsoleLogExplainClear",
     "ConsoleLogExplainToggle",
     "ConsoleLogExplainInspect",
+    "ConsoleLogExplainStop",
   },
   ft = { "javascript", "typescript", "javascriptreact", "typescriptreact", "python" },
 }
@@ -253,8 +256,8 @@ explain = {
 - `:ConsoleLogExplainInspect` (`<leader>lI`) opens the current line's full explanation in a cursor-anchored float — useful when a long explanation is clipped at the screen edge. `q` or `<Esc>` closes it.
 - Explanations are cached: they follow your edits, survive saves and reloads, and are replaced only by re-running `:ConsoleLogExplain` on the section/buffer or removed by `:ConsoleLogExplainClear`.
 - If you keep editing without re-explaining, annotations can drift from the code's meaning; a reload of externally-changed content re-renders them at their last-saved lines.
-- While a request is in flight an animated spinner toast shows progress (`⠹ Explaining lines 101-200 (2/5)`) and resolves into the result message; in-place updates need a `vim.notify` UI such as snacks.nvim, nvim-notify, or noice.
-- There is no cap on the range: ranges longer than `max_lines` (default 50) are split into separate sequential requests — the first chunk starts exactly at the cursor line, continues to the end of the range, then wraps to cover the top, and annotations render progressively as each chunk completes.
+- While a request is in flight an animated spinner toast shows progress (`⠹ Explaining lines 101-200 (2/5)`) and resolves into the result message; in-place updates need a `vim.notify` UI such as snacks.nvim, nvim-notify, or noice. `:ConsoleLogExplainStop` (`<leader>lS`) aborts the in-flight request and the remaining chunks at any time — annotations from chunks that already completed stay rendered.
+- There is no cap on the range: ranges longer than `max_lines` (default 25) are split into separate sequential requests — the first chunk starts exactly at the cursor line, continues to the end of the range, then wraps to cover the top, and annotations render progressively as each chunk completes.
 - Explanations work in any regular buffer regardless of filetype; if you lazy-load the plugin, make sure the explain commands/keys are in your `cmd`/`keys` triggers.
 - A response arriving after the buffer changed mid-request is discarded with a warning; remaining chunks are aborted.
 - `max_tokens` (default 32768) leaves headroom for reasoning models that spend tokens thinking before answering; a truncated response reports "stopped at max_tokens" instead of failing silently. `temperature` is only sent when explicitly set to a number — by default the server/model generation defaults apply.
