@@ -1,3 +1,5 @@
+
+
 # consolelog.nvim
 
 **See your console output right where it belongs - next to your code!**
@@ -294,7 +296,7 @@ Inline output styling inspired by [tiny-inline-diagnostic.nvim](https://github.c
 - **State management**: Module-level tables with buffer-specific keys
 - **Inline history**: Execution tracking directly in output entries
 - **Event-driven**: Callbacks for WebSocket lifecycle events
-- **Zero dependencies**: Pure Lua/JavaScript implementation
+- **Zero dependencies**: Pure Lua/JavaScript/Python implementation
 
 ## Testing
 
